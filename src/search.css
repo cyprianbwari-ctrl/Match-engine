@@ -1,0 +1,14 @@
+.gs-backdrop{position:fixed;inset:0;background:#000a;display:flex;justify-content:center;align-items:flex-start;padding-top:10vh;z-index:80}
+.gs-modal{width:min(600px,92vw);max-height:70vh;background:linear-gradient(160deg,#0e1230,#070a1c);border:1px solid #2a3567;border-radius:14px;box-shadow:0 20px 60px #000a;display:flex;flex-direction:column;overflow:hidden}
+.gs-input-row{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #202a4d}
+.gs-input-row input{flex:1;background:none;border:0;outline:none;color:#edf2ff;font-size:15px}
+.gs-close{background:#10163a;border:1px solid #303d70;color:#c8d0e6;width:28px;height:28px;border-radius:50%;cursor:pointer;flex-shrink:0}
+.gs-body{overflow-y:auto;padding:8px 6px}
+.gs-hint{color:#8f9abb;font-size:12px;padding:16px}
+.gs-group{padding:6px 8px}
+.gs-group-head{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#8f9abb;padding:6px 4px}
+.gs-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;background:none;border:0;border-radius:8px;padding:9px 8px;cursor:pointer;text-align:left;color:#edf2ff}
+.gs-item:hover{background:#141a3a}
+.gs-item b{display:block;font-size:13px}
+.gs-item span{display:block;font-size:10px;color:#8f9abb}
+.gs-avatar{border-radius:50%;display:inline-grid;place-items:center;color:#fff;font-weight:900;flex-shrink:0}
