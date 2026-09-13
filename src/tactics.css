@@ -84,3 +84,104 @@
 .link-chip:hover{border-color:#8a6bff;color:#fff}
 
 .preset-list{margin-top:10px}
+
+/* ===== Tactics — approved Formation-tab design ===== */
+.tac-page{display:flex;flex-direction:column;gap:14px}
+.tac-head{display:flex;align-items:center;gap:14px}
+.tac-head-icon{width:44px;height:44px;border-radius:12px;background:linear-gradient(150deg,#68ff2e,#1f7a1a);display:grid;place-items:center;flex-shrink:0}
+.tac-head h1{margin:0;font-size:24px}
+.tac-tabs{display:flex;gap:6px;border:1px solid #263061;border-radius:9px;padding:5px;background:#080d20;overflow:auto}
+.tac-tabs button{border:0;background:transparent;color:#c4cbe6;padding:10px 15px;white-space:nowrap;font-size:11px;font-weight:700;border-radius:7px;display:flex;align-items:center;gap:7px;cursor:pointer}
+.tac-tabs button.active{background:#68ff2e;color:#06210a}
+
+.tac-toolbar{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;background:linear-gradient(145deg,#0d122c,#080b1c);border:1px solid #2a3567;border-radius:10px;padding:14px}
+.tac-field{display:flex;flex-direction:column;gap:6px;font-size:10px;color:#8f9abb;font-weight:700}
+.tac-field.grow{flex:1;min-width:220px}
+.tac-field select{height:40px;background:#0b1028;border:1px solid #38436f;border-radius:7px;color:#f3f6ff;padding:0 10px;font-size:12px;min-width:150px}
+.tac-name-input{display:flex;align-items:center;gap:8px;height:40px;background:#0b1028;border:1px solid #38436f;border-radius:7px;padding:0 12px}
+.tac-name-input input{flex:1;background:none;border:0;color:#f3f6ff;font-size:12px;outline:none}
+.tac-name-input svg{color:#7c87ab;flex-shrink:0}
+.tac-btn{position:relative;display:flex;align-items:center;gap:8px;height:40px;padding:0 14px;border-radius:7px;background:#0b1028;border:1px solid #38436f;color:#dbe1f7;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+.tac-btn.primary{background:linear-gradient(135deg,#6c5ce7,#8a6bff);border-color:#8a6bff;color:#fff}
+.tac-btn select{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+
+.tac-grid{display:grid;grid-template-columns:260px minmax(0,1fr) 320px;gap:12px;align-items:start}
+.tac-left,.tac-right{display:flex;flex-direction:column;gap:12px}
+.tac-center{display:flex;flex-direction:column;gap:12px}
+
+.shape-row{display:flex;gap:12px;margin-top:6px}
+.shape-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px}
+.shape-label{font-size:9px;color:#8f9abb;font-weight:700;text-transform:uppercase}
+.shape-box{width:100%;aspect-ratio:1;background:#06102a;border:1px solid #234023;border-radius:8px}
+.shape-box.out{border-color:#2a2358}
+.shape-mini{width:100%;height:100%}
+.shape-toggle{background:#0b1028;border:1px solid #38436f;color:#dbe1f7;border-radius:6px;padding:6px 10px;font-size:10px;font-weight:700;cursor:pointer}
+
+.roles-legend{display:flex;align-items:center;gap:8px;font-size:11px;color:#c7d0eb;padding:4px 0}
+.dotlg{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+.dotlg.green{background:#68ff2e}
+.dotlg.red{background:#ef4f4f}
+.dotlg.yellow{background:#f2c94c}
+.dotlg.tiny{width:7px;height:7px}
+
+.tac-pitch{border:1px solid #2d3a71;border-radius:9px;background:#06102a;padding:9px}
+.tac-pitch-head{display:flex;align-items:center;gap:12px;padding:4px 4px 10px}
+.tac-pitch-head>span{font-weight:900;font-size:17px}
+.tac-arrow{background:#0b1330;border:1px solid #45517f;border-radius:7px;color:#dbe1f7;width:28px;height:28px;display:grid;place-items:center;cursor:pointer}
+.tac-fam{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:10px;color:#68ff2e;font-weight:700}
+.tac-fam-bar{width:140px;height:8px;border-radius:99px;background:#0b1028;border:1px solid #2a3567;overflow:hidden}
+.tac-fam-bar i{display:block;height:100%;background:linear-gradient(90deg,#3c9bff,#68ff2e)}
+.tac-fam b{color:#fff}
+.tac-pitch-grass{position:relative;border-radius:8px;overflow:hidden;background:repeating-linear-gradient(90deg,#145b31 0,#145b31 10%,#176b38 10%,#176b38 20%);border:1px solid #9abf87;min-height:640px}
+.tac-pitch-grass:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent 49.7%,#d7ebd4 49.7%,#d7ebd4 50.3%,transparent 50.3%)}
+
+.tac-token{position:absolute;transform:translate(-50%,-50%);width:96px;padding:8px 6px 6px;border-radius:10px;background:linear-gradient(160deg,#101735ee,#0a0e28ee);border:1px solid #3a4a80;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:grab;z-index:2;text-align:center}
+.tac-token.selected{outline:2px solid #68ff2e;box-shadow:0 0 16px #68ff2e66}
+.tac-token:active{cursor:grabbing}
+.tac-fit-dot{position:absolute;top:6px;left:6px;width:8px;height:8px;border-radius:50%}
+.tac-ovr{position:absolute;top:4px;right:5px;background:#3ddc84;color:#06210a;font-size:9px;font-weight:900;border-radius:5px;padding:2px 5px}
+.tac-avatar{width:34px;height:34px;border-radius:50%;background:#2a3358;display:grid;place-items:center;color:#c7d0eb;font-weight:800;font-size:11px;margin-top:6px}
+.tac-avatar.small{width:26px;height:26px;font-size:9px;margin-top:0}
+.tac-token strong{font-size:10.5px;color:#fff;margin-top:2px}
+.tac-duty{font-size:8.5px;color:#7fd9ff}
+.tac-captain{position:absolute;bottom:4px;right:6px;width:15px;height:15px;border-radius:50%;background:#f2c94c;color:#2b2205;font-style:normal;font-weight:900;font-size:9px;display:grid;place-items:center}
+
+.subs-bar{background:linear-gradient(145deg,#0d122c,#080b1c);border:1px solid #2a3567;border-radius:9px;padding:12px}
+.subs-head{font-size:12px;font-weight:800;margin-bottom:9px}
+.subs-row{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+@media(max-width:1250px){.subs-row{grid-template-columns:repeat(3,1fr)}}
+.sub-chip{display:flex;align-items:center;gap:7px;background:#0b1028;border:1px solid #2a3567;border-radius:8px;padding:7px;cursor:grab}
+.sub-chip div{flex:1;overflow:hidden}
+.sub-chip b{display:block;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub-chip small{color:#8f9abb;font-size:9px}
+
+.avail-head{display:flex;align-items:center;justify-content:space-between}
+.avail-head h3{margin:0;font-size:15px}
+.filter-btn{display:flex;align-items:center;gap:6px;background:#0b1028;border:1px solid #38436f;color:#dbe1f7;border-radius:7px;padding:7px 11px;font-size:10px;font-weight:700;cursor:pointer}
+.filter-pills{display:flex;gap:6px;flex-wrap:wrap}
+.filter-pills button{background:#0b1028;border:1px solid #38436f;color:#aab3d6;border-radius:99px;padding:6px 11px;font-size:10px;font-weight:700;cursor:pointer}
+.filter-pills button.active{background:#68ff2e;border-color:#68ff2e;color:#06210a}
+.avail-search{display:flex;align-items:center;gap:8px;background:#0b1028;border:1px solid #38436f;border-radius:7px;padding:0 12px;height:38px}
+.avail-search input{flex:1;background:none;border:0;color:#f3f6ff;font-size:12px;outline:none}
+.avail-search svg{color:#7c87ab}
+.avail-list{background:linear-gradient(145deg,#0d122c,#080b1c);border:1px solid #2a3567;border-radius:9px;padding:6px;max-height:760px;overflow-y:auto}
+.avail-group-head{width:100%;display:flex;justify-content:space-between;align-items:center;background:none;border:0;color:#8f9abb;font-size:10px;font-weight:800;text-transform:uppercase;padding:9px 6px;cursor:pointer}
+.avail-row{display:flex;align-items:center;gap:8px;padding:7px 6px;border-radius:7px;cursor:grab}
+.avail-row:hover{background:#131a39}
+.avail-name{flex:1;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.avail-pos{font-size:9px;color:#8f9abb;width:26px}
+.avail-add{background:#0b1028;border:1px solid #38436f;color:#68ff2e;border-radius:6px;width:24px;height:24px;display:grid;place-items:center;cursor:pointer;flex-shrink:0}
+.badge{display:inline-grid;place-items:center;min-width:26px;height:20px;border-radius:6px;font-size:9.5px;font-weight:900;padding:0 5px}
+.badge.ovr{background:#3ddc84;color:#06210a}
+
+.dnd-help{display:flex;align-items:center;gap:12px}
+.dnd-help-icon{width:34px;height:34px;border-radius:8px;background:linear-gradient(145deg,#8b5cf6,#5233a8);display:grid;place-items:center;color:#fff;flex-shrink:0}
+.dnd-help b{display:block;font-size:12px}
+.dnd-help span{color:#8f9abb;font-size:10.5px}
+
+.problem-row{display:flex;align-items:flex-start;gap:8px;padding:7px 2px;border-bottom:1px solid #1c2547;font-size:11px;color:#dbe2f7}
+.problem-row:last-child{border-bottom:0}
+.problem-row .dotlg{margin-top:4px}
+
+@media(max-width:1300px){.tac-grid{grid-template-columns:1fr 1fr}.tac-right{grid-column:1/-1}}
+@media(max-width:900px){.tac-grid{grid-template-columns:1fr}}

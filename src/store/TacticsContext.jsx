@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useMemo } from 'react';
 import { players as roster } from '../data/roster.js';
 import { FORMATIONS } from '../tactics/formations.js';
+import { autoAssign } from '../tactics/logic.js';
 
 const TacticsCtx = createContext(null);
 
@@ -31,7 +32,7 @@ export function pickStartXI() {
 
 export function TacticsProvider({ children }) {
   const [formation, setFormation] = useState("4-2-3-1");
-  const [assignment, setAssignment] = useState({});
+  const [assignment, setAssignment] = useState(() => autoAssign(FORMATIONS["4-2-3-1"], pickStartXI()));
   const [roleAssignment, setRoleAssignment] = useState({});
   const [dutyAssignment, setDutyAssignment] = useState({});
   const [playerInstructions, setPlayerInstructions] = useState({});
@@ -54,6 +55,11 @@ export function TacticsProvider({ children }) {
   const startXI = pickStartXI();
   const slots = FORMATIONS[formation];
 
+  // The set of player ids currently holding a slot on the pitch — this is
+  // the single source of truth Squad reads to show who's in the XI, so the
+  // two screens can never disagree about who's starting.
+  const startingIds = useMemo(() => new Set(Object.values(assignment).filter(Boolean)), [assignment]);
+
   const value = {
     formation, setFormation, assignment, setAssignment, roleAssignment, setRoleAssignment,
     dutyAssignment, setDutyAssignment, playerInstructions, setPlayerInstructions,
@@ -61,7 +67,7 @@ export function TacticsProvider({ children }) {
     tacticalDelegation, setTacticalDelegation, appliedFixKeys, setAppliedFixKeys,
     autoLog, setAutoLog, presets, setPresets, situationPreset, setSituationPreset,
     setPieces, setSetPieces, oppositionInstructions, setOppositionInstructions,
-    startXI, slots,
+    startXI, slots, startingIds,
   };
 
   return <TacticsCtx.Provider value={value}>{children}</TacticsCtx.Provider>;
