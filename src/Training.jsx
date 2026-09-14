@@ -264,7 +264,7 @@ export default function TrainingScreen({ setActive }) {
   const [tab, setTab] = useState('overview');
   const { openProfileFor } = useWorldData();
   const goTo = (screen) => setActive && setActive(screen);
-  const onOpen = (p) => openProfileFor(mapRosterPlayer(p));
+  const onOpen = (p) => openProfileFor(mapRosterPlayer(p), 'Training');
 
   return <div className="training-page">
     <div className="comm-header">

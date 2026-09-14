@@ -29,6 +29,7 @@ import { ClubProvider } from "./store/ClubContext.jsx";
 import { TrainingProvider } from "./store/TrainingContext.jsx";
 import { TacticsProvider } from "./store/TacticsContext.jsx";
 import { SimulationProvider, useSimulation } from "./store/SimulationContext.jsx";
+import { TransfersProvider } from "./store/TransfersContext.jsx";
 
 const nav = [
   ["Home",Home],["Squad",Users],["Tactics",Crosshair],["Training",Dumbbell],
@@ -84,7 +85,7 @@ function App() {
   const [sidebarCollapsed,setSidebarCollapsed]=useState(false);
   const navigateTo = (screen) => setActive(screen);
 
-  return <StaffProvider><CompetitionProvider><CommunicationProvider><WorldProvider><ClubProvider><TrainingProvider><TacticsProvider><SimulationProvider onGoToMatch={()=>setActive('Match')}><div className="app">
+  return <StaffProvider><CompetitionProvider><CommunicationProvider><WorldProvider><ClubProvider><TrainingProvider><TacticsProvider><TransfersProvider><SimulationProvider onGoToMatch={()=>setActive('Match')}><div className="app">
     <Header onMenuClick={()=>setSidebarCollapsed(c=>!c)} onSearchClick={()=>setSearchOpen(true)} setActive={setActive}/>
     <Sidebar active={active} setActive={setActive} collapsed={sidebarCollapsed}/>
     <main>
@@ -97,11 +98,11 @@ function App() {
           : active==="Scouting"
             ? <ScoutingScreen setActive={setActive}/>
             : active==="Transfers"
-              ? <TransfersScreen/>
+              ? <TransfersScreen setActive={setActive}/>
               : active==="Staff"
                 ? <StaffScreen active={active} setActive={setActive}/>
                 : active==="Finance"
-                  ? <FinanceScreen/>
+                  ? <FinanceScreen setActive={setActive}/>
                 : active==="Competitions"
                   ? <CompetitionsScreen/>
                 : active==="Communications"
@@ -116,6 +117,6 @@ function App() {
     </main>
     <PlayerProfileModal goTo={setActive}/>
     <GlobalSearch open={searchOpen} onClose={()=>setSearchOpen(false)} navigateTo={navigateTo}/>
-  </div></SimulationProvider></TacticsProvider></TrainingProvider></ClubProvider></WorldProvider></CommunicationProvider></CompetitionProvider></StaffProvider>
+  </div></SimulationProvider></TransfersProvider></TacticsProvider></TrainingProvider></ClubProvider></WorldProvider></CommunicationProvider></CompetitionProvider></StaffProvider>
 }
 createRoot(document.getElementById("root")).render(<App/>);

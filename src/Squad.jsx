@@ -13,6 +13,7 @@ import { useStaffData } from './store/StaffContext.jsx';
 import { useClubData } from './store/ClubContext.jsx';
 import { useCompetitionData } from './store/CompetitionContext.jsx';
 import { useTacticsData } from './store/TacticsContext.jsx';
+import { useTransfersData } from './store/TransfersContext.jsx';
 import { mapRosterPlayer } from './data/homeData.js';
 import { clubIdentity, stadium, clubReputation, squadStaffSummary } from './data/clubData.js';
 
@@ -62,7 +63,9 @@ const STATUS_CLASS = {
   'Rotation': 'st-rotation', 'Backup': 'st-backup', 'Third Choice': 'st-backup',
   'Prospect': 'st-youngster', 'Youth': 'st-youngster', 'Emergency': 'st-rotation',
 };
-function statusMeta(p) {
+function statusMeta(p, sharedTransferListed, sharedLoanListed) {
+  if (sharedTransferListed) return { label: 'Transfer Listed', cls: 'st-transfer' };
+  if (sharedLoanListed) return { label: 'Loan Listed', cls: 'st-loan' };
   if (p.override === 'Transfer Listed') return { label: 'Transfer Listed', cls: 'st-transfer' };
   if (p.override === 'On Loan') return { label: 'On Loan', cls: 'st-loan' };
   if (p.override === 'Unavailable') return { label: 'Unavailable', cls: 'st-unavail' };
@@ -101,6 +104,7 @@ function SquadTable({ rows, onOpen, startingIds }) {
 function OverviewOv({ players, setPlayers, onOpen, goTo }) {
   const { formation, startingIds } = useTacticsData();
   const { league } = useCompetitionData();
+  const { transferListedRosterIds, loansOut } = useTransfersData();
   const [ovFilter, setOvFilter] = useState('All');
   const [sortKey, setSortKey] = useState('ovr');
   const [activeRow, setActiveRow] = useState(null);
@@ -220,7 +224,7 @@ function OverviewOv({ players, setPlayers, onOpen, goTo }) {
         <div className="ov-table">
           <div className="ov-row ov-head"><span>#</span><span>Pos</span><span>Player</span><span>Nat</span><span>Age</span><span>OVR</span><span>POT</span><span>Con</span><span>Sharp</span><span>Morale</span><span>Form</span><span>Apps</span><span>Wage</span><span>Value</span><span>Status</span></div>
           {ovRows.map(p => {
-            const st = statusMeta(p);
+            const st = statusMeta(p, transferListedRosterIds.includes(p.id), loansOut.some(l => l.rosterId === p.id));
             return <button key={p.id} className={"ov-row ov-body" + (activeRow && activeRow.id === p.id ? ' sel' : '')} onClick={() => setActiveRow(p)}>
               <span>{p.number}</span>
               <span>{p.displayPos}</span>
@@ -409,13 +413,47 @@ function PlayerSearchTab({ players, onOpen, goTo, startingIds }) {
 
 const TABS = [['overview', 'Overview', Users], ['firstTeam', 'First Team', ShieldCheck], ['youth', 'Youth', Sprout], ['search', 'Player Search', SearchIcon]];
 
+const NEW_SIGNING_POS_MAP = { GK:'GK', ST:'ST', LW:'AML', RW:'AMR', CAM:'AMC', AM:'AMC', CM:'MC', CDM:'DM', DM:'DM', CB:'DC', LB:'DL', RB:'DR', WB:'DR' };
+function bucketFor(displayPos) {
+  if (displayPos === 'GK') return 'GK';
+  if (['DL','DR','DC'].includes(displayPos)) return 'DEF';
+  if (['DM','MC','AMC'].includes(displayPos)) return 'MID';
+  return 'ATT';
+}
+
 export default function SquadScreen({ setActive }) {
   const [tab, setTab] = useState('overview');
   const [players, setPlayers] = useState(rosterSeed);
   const { openProfileFor } = useWorldData();
   const { startingIds } = useTacticsData();
+  const { signings } = useTransfersData();
   const goTo = (screen) => setActive(screen);
-  const onOpen = (p) => openProfileFor(mapRosterPlayer(p));
+  const onOpen = (p) => openProfileFor(mapRosterPlayer(p), 'Squad');
+
+  // Players bought through Transfers land here automatically — matched by
+  // name so a completed signing only gets added to the roster once.
+  useEffect(() => {
+    if (!signings.length) return;
+    setPlayers(ps => {
+      const existingNames = new Set(ps.map(p => p.name));
+      const fresh = signings.filter(s => !existingNames.has(s.name));
+      if (!fresh.length) return ps;
+      const nextId = Math.max(...ps.map(p => p.id), 0) + 1;
+      const added = fresh.map((s, i) => {
+        const displayPos = NEW_SIGNING_POS_MAP[s.pos] || s.pos;
+        const bucket = bucketFor(displayPos);
+        return {
+          id: nextId + i, pos: displayPos, name: s.name, role: s.tacticalRole || 'CM', nat: s.nat,
+          fit: 92, rate: 7.0, number: 40 + i, displayPos, bucket, age: s.age, ovr: s.ovr,
+          form: [7.0, 7.0, 7.0, 7.0], morale: 'Good', playTime: 'Squad Player',
+          contract: `Jun ${2025 + (s.years || 4)}`,
+          wage: s.wage ? (typeof s.wage === 'string' ? s.wage : `£${Math.round(s.wage / 1000)}k/w`) : '£80k/w',
+          availability: 'Available', value: `£${Math.round(s.value)}`, roleLabel: s.tacticalRole || 'Midfielder',
+        };
+      });
+      return [...ps, ...added];
+    });
+  }, [signings]);
 
   return <div className="squad-page">
     <div className="comm-header">

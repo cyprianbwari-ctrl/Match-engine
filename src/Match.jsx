@@ -63,8 +63,8 @@ function matchRating(p) {
 }
 function pct(a, b) { return b > 0 ? Math.round((a / b) * 100) : 0; }
 
-function buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName, league }) {
-  const homePairs = slots.map((slot, i) => ({ slot, player: startXI.find(p => p.id === assignment[slot.id]) || startXI[i % startXI.length] }));
+function buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName, league, dutyAssignment }) {
+  const homePairs = slots.map((slot, i) => ({ slot, duty: dutyAssignment?.[slot.id] || 'Support', player: startXI.find(p => p.id === assignment[slot.id]) || startXI[i % startXI.length] }));
   const homeXI = buildXI(homePairs, 'home');
 
   const fixture = league.fixtures[0];
@@ -76,7 +76,8 @@ function buildMatchState({ slots, assignment, startXI, teamInstructions, pressin
   // Give the generated opponent pool recognisable names/positions for this
   // specific fixture rather than generic placeholders, when we have them.
   const namedPool = oppPool.map((p, i) => BRIGHTON_XI_NAMES[i] ? { ...p, name: BRIGHTON_XI_NAMES[i].name } : p);
-  const awayPairs = oppSlots.map((slot, i) => ({ slot, player: namedPool[i] }));
+  const DEFAULT_DUTY = { GK:'Defend', DL:'Support', DR:'Support', DC:'Defend', DM:'Defend', MC:'Support', AMC:'Support', AML:'Attack', AMR:'Attack', ST:'Attack' };
+  const awayPairs = oppSlots.map((slot, i) => ({ slot, duty: DEFAULT_DUTY[slot.code] || 'Support', player: namedPool[i] }));
   const awayXI = buildXI(awayPairs, 'away');
 
   const state = initMatch({
@@ -117,12 +118,12 @@ function PitchMarker({ p, isBall, onClick, selected }) {
 }
 
 export default function MatchScreen({ setActive }) {
-  const { slots, assignment, startXI, teamInstructions, pressing, tacticalDelegation, formation } = useTacticsData();
+  const { slots, assignment, startXI, teamInstructions, pressing, tacticalDelegation, formation, dutyAssignment } = useTacticsData();
   const { league, recordUserMatchResult } = useCompetitionData();
   const { reportLiveMatch } = useSimulation();
   const { openProfileFor } = useWorldData();
 
-  const [match, setMatch] = useState(() => buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName: 'Man Utd', league }));
+  const [match, setMatch] = useState(() => buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName: 'Man Utd', league, dutyAssignment }));
   const [running, setRunning] = useState(false);
   const [speed, setSpeed] = useState(4);
   const [highlightsOnly, setHighlightsOnly] = useState(true);
@@ -173,7 +174,7 @@ export default function MatchScreen({ setActive }) {
 
   const restart = () => {
     resultRecorded.current = false;
-    setMatch(buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName: 'Man Utd', league }));
+    setMatch(buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName: 'Man Utd', league, dutyAssignment }));
     setSelectedId(null); setSubsMade(0);
   };
   const bench = useMemo(() => roster.filter(p => !match.homeXI.some(h => h.id === p.id)), [match.homeXI]);
@@ -441,7 +442,7 @@ export default function MatchScreen({ setActive }) {
               <div><small>Tackles</small><b>{selected.tackles || 0}</b></div>
             </div>
             <div className="pd-behaviour"><Gauge size={13} /> Tactical Behaviour <b>{tacticalBehaviour(selected)}</b></div>
-            {selected.teamSide === 'home' && <button className="link-btn" onClick={() => openProfileFor(mapRosterPlayer(roster.find(r => r.id === selected.id) || { id: selected.id, name: selected.name, displayPos: selected.pos }))}>View Full Profile</button>}
+            {selected.teamSide === 'home' && <button className="link-btn" onClick={() => openProfileFor(mapRosterPlayer(roster.find(r => r.id === selected.id) || { id: selected.id, name: selected.name, displayPos: selected.pos }), 'Match')}>View Full Profile</button>}
           </>}
         </section>
 

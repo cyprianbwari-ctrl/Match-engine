@@ -200,7 +200,7 @@ export default function TacticsScreen({ setActive }) {
         dutyAssignment={dutyAssignment} setDutyAssignment={setDutyAssignment}
         instructions={selectedSlot ? (playerInstructions[selectedSlot.id] || new Set()) : new Set()}
         toggleInstruction={item => selectedSlot && togglePlayerInstruction(selectedSlot.id, item)}
-        onViewProfile={p => openProfileFor(mapRosterPlayer(p))} goTo={setActive} />
+        onViewProfile={p => openProfileFor(mapRosterPlayer(p), 'Tactics')} goTo={setActive} />
       <SquareSystemForm slots={slots} playerFor={playerFor} onAdd={addSquare} squares={squares} onRemove={removeSquare} />
     </div>}
 
@@ -215,7 +215,7 @@ export default function TacticsScreen({ setActive }) {
         dutyAssignment={dutyAssignment} setDutyAssignment={setDutyAssignment}
         instructions={selectedSlot ? (playerInstructions[selectedSlot.id] || new Set()) : new Set()}
         toggleInstruction={item => selectedSlot && togglePlayerInstruction(selectedSlot.id, item)}
-        onViewProfile={p => openProfileFor(mapRosterPlayer(p))} goTo={setActive} />
+        onViewProfile={p => openProfileFor(mapRosterPlayer(p), 'Tactics')} goTo={setActive} />
     </div>}
 
     {tab === "Set Pieces" && <SetPiecesPanel startXI={firstTeamPool.filter(p => Object.values(assignment).includes(p.id))} setPieces={setPieces} setSetPieces={setSetPieces} />}

@@ -1,26 +1,47 @@
-// FAMILY 26 Match Engine — fixed-timestep, spatial-grid 2D simulation.
+// FAMILY 26 Match Engine — rebuilt from the ground up (v2).
 //
-// Architecture per fixed 50 ms tick:
-// 1) Perception       -> rebuild 18x12 spatial influence/pressure maps.
-// 2) Decision         -> utility-score pass / run / press / carry / shot choices.
-// 3) Physics/Steering -> move players with velocity vectors and move the ball.
-// 4) Collision/Events -> resolve tackles, interceptions, shots, goals, turnovers.
+// Why this exists: the previous engine let far too many players chase the
+// ball at once, re-decided actions every tick (causing cascading instability
+// and unrealistic scorelines), and resolved shots/passes instantly with no
+// real travel time. This version fixes all three by construction:
 //
-// The simulation clock is independent from rendering. Match.jsx can render at
-// any frame rate; this engine advances only in fixed-size simulation ticks.
+//   1. MOVEMENT is role-differentiated every tick. Only the 1-2 nearest
+//      defenders to the ball ("pressers") ever move directly toward it.
+//      Only ONE attacker at a time ("the runner") makes a forward run.
+//      Everyone else holds/shifts a zonal shape relative to their own
+//      formation slot and the ball's general area — a compact block, not a
+//      crowd. This is the direct fix for "all of them running in the same
+//      direction."
+//   2. DECISIONS happen once per genuine possession touch, not every tick —
+//      a player who receives the ball commits to a pass/shot/dribble and
+//      that plays out over several ticks before anyone decides again.
+//   3. The BALL is explicit and separate from any player once struck: a
+//      pass or shot becomes an actual travelling object (ballInFlight) that
+//      takes real ticks to arrive and can be intercepted along the way,
+//      rather than resolving in the same tick it was declared.
+//
+// External API (buildXI, buildOpponentPool, initMatch, stepMatch,
+// resolveDecision, simulateInstant, substitutePlayer) is unchanged so the
+// Match.jsx UI needed no changes for this rebuild.
 
 import { players as worldPlayers } from '../data/worldData.js';
-import { buildTacticalModel, styleEffect, readinessScore, aiRotationNeed } from './fmMatchLabAdapter.js';
+import { readinessScore, aiRotationNeed } from './fmMatchLabAdapter.js';
 
 export const FIXED_DT_MS = 50;
 export const FIXED_GAME_SECONDS = 0.5;
-export const GRID_COLS = 18;
-export const GRID_ROWS = 12;
+
+// ============================================================================
+// Data construction (roster/attributes) — unchanged from the previous engine.
+// This was never the source of the movement/scoreline problems; only the
+// decision/physics/collision core below has been rebuilt.
+// ============================================================================
 
 function seededRand(seed) {
   let s = Math.abs(Number(seed) || 1) % 2147483647;
   if (s <= 0) s += 2147483646;
-  return () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const next = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  next(); next(); next();
+  return next;
 }
 
 const ATTR_KEYS = [
@@ -103,20 +124,15 @@ export function buildOpponentPool(strengthRating, formationSlots, clubName = 'Op
 }
 
 export function buildXI(pairs, teamSide) {
-  return pairs.map(({ slot, player: p }, i) => {
+  return pairs.map(({ slot, player: p, duty }, i) => {
     const attrs = p.keyAttributes
       ? attrsFromWorld(p.keyAttributes, p.ovr ?? 70, slot.code)
       : synthAttrs(p.id ?? i, p.ovr ?? 70, slot.code, p.sourceRating ?? p.ovr ?? 70);
-    // formations.js slots are authored for a VERTICAL tactics board: slot.x is
-    // the width axis (touchline to touchline), slot.y is the length axis
-    // (91 = own goal, 18 = opponent's goal). This engine renders a HORIZONTAL
-    // pitch where x is the length/attacking axis (home attacks toward x=100,
-    // away toward x=0) and y is the width axis. So x/y must be remapped, not
-    // reused directly, or every player ends up on the wrong part of the pitch.
     const x = teamSide === 'away' ? slot.y : 100 - slot.y;
     const y = slot.x;
     return {
       id: p.id ?? `gen-${i}`, name: p.name || `Player ${i + 1}`, pos: slot.code, role: slot.label,
+      duty: duty || p.duty || 'Support',
       ovr: p.ovr ?? 70, fit: p.fit ?? 90, morale: p.morale || 'Good', attrs,
       tacticalFamiliarity: p.tacticalFamiliarity ?? 70, condition: p.condition ?? p.fit ?? 90,
       readiness: readinessScore(p), rotationNeed: aiRotationNeed(p, 0, 0),
@@ -125,6 +141,7 @@ export function buildXI(pairs, teamSide) {
       teamSide,
       action: 'shape',
       targetX: x, targetY: y,
+      tackleCooldown: 0,
       lastActionTick: 0,
       touches: 0, passesAttempted: 0, passesCompleted: 0, shots: 0, goals: 0, assists: 0, tackles: 0, distanceKm: 0,
     };
@@ -139,6 +156,10 @@ export function substitutePlayer(xi, outId, inPlayer) {
   });
 }
 
+// ============================================================================
+// Small shared utilities.
+// ============================================================================
+
 const MENTALITY_ATTACK = { 'Very Defensive':-2, Defensive:-1, Balanced:0, Positive:1, Attacking:2, 'Very Attacking':3 };
 
 function clamp(v,a,b) { return Math.max(a,Math.min(b,v)); }
@@ -147,609 +168,441 @@ function outfield(xi) { return xi.filter(p => p.pos !== 'GK'); }
 function fatigueFactor(p) { return Math.max(.62, 1 - p.fatigue / 170); }
 function moraleFactor(p) { return p.morale === 'Good' ? 1.05 : p.morale === 'Unhappy' ? .94 : 1; }
 function effAttr(p,key) { return (p.attrs?.[key] || 60) * fatigueFactor(p) * moraleFactor(p) * ((p.fit || 90) / 100); }
-function teamAvg(xi,key) { const arr=outfield(xi); return arr.reduce((s,p)=>s+effAttr(p,key),0)/Math.max(1,arr.length); }
-
-function gridIndex(x,y) {
-  const c = clamp(Math.floor((x / 100) * GRID_COLS), 0, GRID_COLS - 1);
-  const r = clamp(Math.floor((y / 100) * GRID_ROWS), 0, GRID_ROWS - 1);
-  return r * GRID_COLS + c;
-}
-
-function emptyGrid() {
-  return Array.from({length: GRID_COLS * GRID_ROWS}, () => ({
-    home: 0, away: 0, homeCount: 0, awayCount: 0, pressureHome: 0, pressureAway: 0
-  }));
-}
-
-// 18x12 spatial influence map. Each player contributes a soft influence radius
-// based on positioning, anticipation, work rate and tactical pressure.
-function buildInfluenceMap(xi, side, tactics) {
-  const grid = emptyGrid();
-  const model = buildTacticalModel(tactics);
-  const intensity = model.pressing.intensity / 55;
-  xi.forEach(p => {
-    const radius = p.pos === 'GK' ? 8 : 7 + effAttr(p,'anticipation') / 20;
-    const c0 = clamp(Math.floor((p.x / 100) * GRID_COLS),0,GRID_COLS-1);
-    const r0 = clamp(Math.floor((p.y / 100) * GRID_ROWS),0,GRID_ROWS-1);
-    for (let r=Math.max(0,r0-2); r<=Math.min(GRID_ROWS-1,r0+2); r++) {
-      for (let c=Math.max(0,c0-2); c<=Math.min(GRID_COLS-1,c0+2); c++) {
-        const cx=(c+.5)*(100/GRID_COLS), cy=(r+.5)*(100/GRID_ROWS);
-        const d=Math.hypot(cx-p.x,cy-p.y);
-        if (d>radius*1.8) continue;
-        const w=Math.max(0,1-d/(radius*1.8));
-        const idx=r*GRID_COLS+c;
-        grid[idx][side] += w * (.65 + effAttr(p,'workRate')/200);
-        if (side === 'home') grid[idx].homeCount += w;
-        else grid[idx].awayCount += w;
-      }
-    }
-  });
-  // Pressure is relative influence: a side's defensive pressure is increased
-  // in cells occupied by the opponent.
-  grid.forEach(cell => {
-    cell.pressureHome = cell.away * intensity;
-    cell.pressureAway = cell.home * intensity;
-  });
-  return grid;
-}
-
-function perceive(state) {
-  const grid = emptyGrid();
-  const homeMap = buildInfluenceMap(state.homeXI,'home',state.homeTactics);
-  const awayMap = buildInfluenceMap(state.awayXI,'away',state.awayTactics);
-  for (let i=0;i<grid.length;i++) {
-    grid[i].home = homeMap[i].home;
-    grid[i].away = awayMap[i].away;
-    grid[i].homeCount = homeMap[i].homeCount;
-    grid[i].awayCount = awayMap[i].awayCount;
-    grid[i].pressureHome = awayMap[i].away * ((state.homeTactics?.pressing?.intensity??55)/55);
-    grid[i].pressureAway = homeMap[i].home * ((state.awayTactics?.pressing?.intensity??55)/55);
-  }
-  const ballCell = grid[gridIndex(state.ballX,state.ballY)];
-  const attack = state.possession === 'home' ? 'home' : 'away';
-  const defend = attack === 'home' ? 'away' : 'home';
-  const nearest = (attack === 'home' ? state.homeXI : state.awayXI)
-    .filter(p=>p.pos!=='GK')
-    .map(p=>({p,d:distance(p,{x:state.ballX,y:state.ballY})}))
-    .sort((a,b)=>a.d-b.d)
-    .slice(0,4);
-  state.spatial = {
-    cols: GRID_COLS, rows: GRID_ROWS, grid,
-    ballCell, ballCellIndex:gridIndex(state.ballX,state.ballY),
-    nearestAttackers: nearest.map(x=>x.p.id),
-    pressure: { attack: attack==='home'?ballCell.pressureHome:ballCell.pressureAway,
-      defend: defend==='home'?ballCell.pressureHome:ballCell.pressureAway }
-  };
-  return state.spatial;
-}
-
-function teamPower(xi,tactics) {
-  const technical=teamAvg(xi,'passing')*.20+teamAvg(xi,'technique')*.12+teamAvg(xi,'vision')*.10;
-  const defensive=teamAvg(xi,'tackling')*.18+teamAvg(xi,'positioning')*.12+teamAvg(xi,'anticipation')*.10;
-  const athletic=teamAvg(xi,'pace')*.08+teamAvg(xi,'workRate')*.05+teamAvg(xi,'strength')*.05;
-  const mentality=(MENTALITY_ATTACK[tactics?.mentality]??0)*2.5;
-  return technical+defensive+athletic+mentality;
-}
-
-export function initMatch({ homeXI, awayXI, homeName, awayName, homeTactics, awayTactics }) {
-  const state = {
-    minute:0, second:0, possession:'home', phase:'build-up', phaseTick:0, tick:0,
-    ballX:50, ballY:50, ballVX:0, ballVY:0, ballTargetX:50, ballTargetY:50,
-    ballOwnerId:null, score:{home:0,away:0}, homeName, awayName,
-    homeXI, awayXI, homeTactics, awayTactics,
-    events:[{minute:0,second:0,text:'Kick-off.',type:'info',team:null}],
-    pendingDecision:null, finished:false, lastEventPlayer:null,
-    spatial:null, currentAction:null, possessionChain:0,
-    stats: {
-      home: { shots:0, onTarget:0, corners:0, fouls:0, passesAttempted:0, passesCompleted:0, xG:0 },
-      away: { shots:0, onTarget:0, corners:0, fouls:0, passesAttempted:0, passesCompleted:0, xG:0 },
-    },
-    possessionTicks: { home:0, away:0 },
-    territoryTicks: { home:0, away:0 },
-    lastPasser: null,
-  };
-  perceive(state);
-  return state;
-}
 
 function log(state,text,type='play',team=null) {
   state.events.unshift({minute:state.minute,second:Math.floor(state.second),text,type,team});
   state.events=state.events.slice(0,80);
 }
 
-function nearestDefenders(player, defendXI, n=3) {
-  return outfield(defendXI).map(d=>({d,dist:distance(player,d)})).sort((a,b)=>a.dist-b.dist).slice(0,n);
+// ============================================================================
+// Role-based shape/behaviour tables — the heart of the rebuild.
+// ============================================================================
+
+const RUN_WEIGHT = { ST:5, AMC:4, AML:4, AMR:4, MC:2, DM:1, DR:1.4, DL:1.4, DC:0.2, GK:0 };
+const SHAPE_ELASTICITY = { GK:0.04, DC:0.16, DL:0.30, DR:0.30, DM:0.22, MC:0.34, AMC:0.42, AML:0.46, AMR:0.46, ST:0.40 };
+
+function shapeTarget(p, state) {
+  const dir = p.teamSide === 'home' ? 1 : -1;
+  const ballAdvance = state.ballX - 50;
+  const elasticity = SHAPE_ELASTICITY[p.pos] ?? 0.25;
+  const shiftX = clamp(ballAdvance * elasticity * dir, -16, 16) * dir;
+  const shiftY = clamp((state.ballY - p.baseY) * 0.12, -8, 8);
+  return { x: clamp(p.baseX + shiftX, 3, 97), y: clamp(p.baseY + shiftY, 4, 96) };
 }
 
-function pressureAt(player, defendXI) {
-  const near=nearestDefenders(player,defendXI,3);
-  if (!near.length) return 0;
-  return near.reduce((s,o)=>s+clamp(20-o.dist,0,20),0)/near.length;
+function pickPressers(defendXI, ball) {
+  return outfield(defendXI)
+    .map(p => ({ p, d: distance(p, ball) }))
+    .sort((a,b) => a.d - b.d)
+    .slice(0, 2)
+    .map(x => x.p.id);
 }
 
-function chooseCarrier(xi,state) {
-  const candidates=outfield(xi);
-  // Only players actually near the ball can plausibly be the one who gets
-  // it next — without this, attribute-weighted scoring alone can hand
-  // possession straight to an advanced striker sitting near the opponent's
-  // box even right after a kick-off/restart, letting them shoot instantly.
-  const near=candidates.filter(p=>distance(p,{x:state.ballX,y:state.ballY})<22);
-  const pool=near.length?near:candidates;
-  return pool.sort((a,b)=>{
-    const da=distance(a,{x:state.ballX,y:state.ballY});
-    const db=distance(b,{x:state.ballX,y:state.ballY});
-    const sa=.16*effAttr(a,'decisions')+.13*effAttr(a,'technique')+.10*effAttr(a,'passing')+
-      .08*effAttr(a,'dribbling')+.53*(100-da);
-    const sb=.16*effAttr(b,'decisions')+.13*effAttr(b,'technique')+.10*effAttr(b,'passing')+
-      .08*effAttr(b,'dribbling')+.53*(100-db);
-    return sb-sa;
-  })[0] || xi[0];
+function pickRunner(attackXI, state) {
+  const candidates = outfield(attackXI).filter(p => p.id !== state.ballOwnerId);
+  if (!candidates.length) return null;
+  const weighted = candidates.map(p => ({
+    id: p.id,
+    w: (RUN_WEIGHT[p.pos] ?? 1) * (0.6 + effAttr(p,'offBall')/160) * (0.5 + Math.random())
+  }));
+  weighted.sort((a,b) => b.w - a.w);
+  return weighted[0].id;
 }
 
-function roleSpaceTarget(p, state, attacking) {
-  const dir=attacking ? 1 : -1;
-  const model = buildTacticalModel(p.teamSide==='home' ? state.homeTactics : state.awayTactics);
-  const fx = styleEffect(p.teamSide==='home' ? state.homeTactics : state.awayTactics);
-
-  const isWide=['DR','DL','AML','AMR'].includes(p.pos);
-  const isFront=['ST','AML','AMR','AMC'].includes(p.pos);
-  let tx=p.baseX, ty=p.baseY;
-  // Maintain shape but allow tactical movement around the ball.
-  if (attacking) {
-    tx += dir * (isFront ? 4 : ['MC','DM'].includes(p.pos) ? 1.5 : .7);
-    if (p.pos==='ST') tx += dir*3;
-    if (p.pos==='AML') { tx += dir*3; ty -= 2; }
-    if (p.pos==='AMR') { tx += dir*3; ty += 2; }
-    if (p.pos==='DR' || p.pos==='DL') tx += dir*3;
-  } else {
-    tx += dir * (isFront ? -2 : -0.7);
-  }
-  if (isWide) ty += clamp((state.ballY-ty)*(.10 + fx.width*.18),-7,7);
-  else ty += clamp((state.ballY-ty)*(.07 + fx.width*.08),-4,4);
-  // Tactical depth controls how aggressively the shape steps toward the ball.
-  if (attacking) tx += dir * ((50-model.defensiveLine) * 0.018);
-  return {x:clamp(tx,3,97),y:clamp(ty,4,96)};
+function runTarget(p, state) {
+  const dir = p.teamSide === 'home' ? 1 : -1;
+  const depth = clamp(p.baseX + dir * (18 + effAttr(p,'pace')/8), 8, 92);
+  const width = clamp(p.baseY + (Math.random()-0.5) * 10, 8, 92);
+  return { x: depth, y: width };
 }
 
-function chooseRunTarget(p,state,attackXI,defendXI,tactics) {
-  const dir=state.possession==='home'?1:-1;
-  const fx=styleEffect(tactics);
-  const defenders=outfield(defendXI);
-  const nearest=defenders.map(d=>distance(p,d)).sort((a,b)=>a-b)[0]??30;
-  const forward=dir*(p.x-p.baseX);
-  const rand=seededRand(hashId(p.id)+state.tick*31)();
-  const target=roleSpaceTarget(p,state,true);
-  // All requested run types: behind, cut-inside, overlap and late midfield runs.
-  if (p.pos==='ST') {
-    target.x=clamp(p.x+dir*((4+effAttr(p,'pace')/18)*(0.75+fx.runFrequency)),8,92);
-    target.y=clamp(p.y + (rand-.5)*5,8,92);
-  } else if (p.pos==='AML'||p.pos==='AMR') {
-    target.x=clamp(p.x+dir*((3+effAttr(p,'acceleration')/22)*(0.8+fx.runFrequency*.7)),5,95);
-    target.y=clamp(p.y+(p.pos==='AML'?2.5:-2.5),5,95);
-  } else if (p.pos==='DR'||p.pos==='DL') {
-    target.x=clamp(p.x+dir*((5+effAttr(p,'pace')/20)*(0.8+fx.overlapFrequency*.8)),4,96);
-    target.y=clamp(p.y+(p.pos==='DR'?-2:2),5,95);
-  } else if (p.pos==='MC'||p.pos==='DM'||p.pos==='AMC') {
-    target.x=clamp(p.x+dir*((2.2+effAttr(p,'offBall')/30)*(0.8+fx.runFrequency*.5)),5,95);
-    target.y=clamp(p.y+(rand-.5)*3,8,92);
-  }
-  // If defenders are close, prefer a diagonal space away from the nearest marker.
-  if (nearest<11) target.y=clamp(target.y+(p.y<50?-4:4),4,96);
-  return target;
-}
+// ============================================================================
+// Movement — runs every tick. Everyone interpolates toward ONE target chosen
+// by their role this tick (press / run / hold shape / carry).
+// ============================================================================
 
-function scorePass(carrier,receiver,defendXI,state,tactics) {
-  const dir=state.possession==='home'?1:-1;
-  const forward=dir*(receiver.x-carrier.x);
-  const d=distance(carrier,receiver);
-  const mid={x:(carrier.x+receiver.x)/2,y:(carrier.y+receiver.y)/2};
-  const pressure=pressureAt(receiver,defendXI);
-  const cell=state.spatial?.grid?.[gridIndex(receiver.x,receiver.y)];
-  const space=100-clamp((cell?.[state.possession==='home'?'pressureHome':'pressureAway']||0)*24,0,70);
-  const lane=100-clamp(pressureAt(mid,defendXI)*4,0,70);
-  const fx=styleEffect(tactics);
-  const throughBonus=forward>7 && receiver.offBallAction==='run' ? 10 + fx.forwardPassing*8 : 0;
-  const distanceFit=fx.shortPassing*(1-Math.min(1,d/35))*8 + fx.forwardPassing*Math.min(1,Math.max(0,forward)/30)*12;
-  return effAttr(carrier,'passing')*.26+effAttr(carrier,'vision')*.20+effAttr(carrier,'decisions')*.12+
-    effAttr(receiver,'offBall')*.13+space*.14+lane*.08+forward*(.35+fx.forwardPassing*.45)-Math.min(35,d*.30)+throughBonus+distanceFit+
-    ((fx.tempo*100)-50)*.10;
-}
+function movementStep(state) {
+  const ball = { x: state.ballX, y: state.ballY };
+  const attackSide = state.possession;
+  const defendSide = attackSide === 'home' ? 'away' : 'home';
+  const attackXI = attackSide === 'home' ? state.homeXI : state.awayXI;
+  const defendXI = defendSide === 'home' ? state.homeXI : state.awayXI;
 
-function chooseReceiver(carrier,attackXI,defendXI,state,tactics) {
-  return outfield(attackXI).filter(p=>p.id!==carrier.id)
-    .map(p=>({p,score:scorePass(carrier,p,defendXI,state,tactics)}))
-    .sort((a,b)=>b.score-a.score)[0]?.p;
-}
+  const pressers = new Set(pickPressers(defendXI, ball));
+  state.pressers = [...pressers];
 
-function selectDefender(defendXI,target,state) {
-  return outfield(defendXI).map(p=>{
-    const d=distance(p,target);
-    const cell=state.spatial?.grid?.[gridIndex(target.x,target.y)];
-    const tacticalPressure=(cell?.[state.possession==='home'?'pressureAway':'pressureHome']||0);
-    const score=effAttr(p,'tackling')*.30+effAttr(p,'anticipation')*.22+effAttr(p,'positioning')*.18+
-      effAttr(p,'pace')*.10+effAttr(p,'aggression')*.08+effAttr(p,'decisions')*.07+
-      tacticalPressure*2.2-d*.85;
-    return {p,score};
-  }).sort((a,b)=>b.score-a.score)[0]?.p;
-}
-
-function resolveShot(attacker,gk,defenders,state,tactics) {
-  const nearest=defenders.filter(p=>p.pos!=='GK').sort((a,b)=>distance(a,attacker)-distance(b,attacker)).slice(0,3);
-  const pressure=nearest.reduce((s,p)=>s+clamp(18-distance(p,attacker),0,18),0)/Math.max(1,nearest.length);
-  const xDist=state.possession==='home'?100-attacker.x:attacker.x;
-  // Shot quality (attacker's side of the equation) and keeper quality are
-  // both normalised to roughly the same 0-100 attribute scale, then
-  // combined into a single scoring PROBABILITY (not an arbitrary threshold
-  // comparison) — this is what keeps conversion rates realistic instead of
-  // nearly every shot going in regardless of the goalkeeper.
-  const quality=effAttr(attacker,'finishing')*.30+effAttr(attacker,'composure')*.15+effAttr(attacker,'technique')*.10+
-    effAttr(attacker,'decisions')*.05+(100-clamp(xDist,0,100))*.35-pressure*1.1+
-    (MENTALITY_ATTACK[tactics?.mentality]||0)*1.5;
-  const gkQuality=gk?(effAttr(gk,'positioning')*.3+effAttr(gk,'anticipation')*.3+effAttr(gk,'composure')*.2+effAttr(gk,'decisions')*.2):55;
-  // 3%-55% scoring chance — a tap-in against a poor keeper tops out around
-  // the mid-50s; a speculative long-range effort under pressure sits near
-  // the floor, matching real-world shot-conversion and xG ranges.
-  const scoreProb=clamp((quality-gkQuality*0.55)/2.6,2,38);
-  const xg=scoreProb/100;
-  const roll=Math.random()*100;
-  if(roll<scoreProb) return {goal:true,text:`${attacker.name} finds the finish... GOAL!`,xg};
-  // Even off-target/blocked efforts aren't all "saves" — split the miss
-  // between a keeper save (on target) and off-target/blocked (not on
-  // target), roughly matching real shots-on-target ratios.
-  if(roll<scoreProb+ (100-scoreProb)*0.45) return {goal:false,text:`${attacker.name} gets the shot away, but the goalkeeper saves it!`,xg,onTarget:true};
-  return {goal:false,text:`${attacker.name}'s effort is blocked or misses under pressure.`,xg,onTarget:false};
-}
-
-function setBallTarget(state,x,y,ownerId=null) {
-  state.ballTargetX=clamp(x,1,99); state.ballTargetY=clamp(y,2,98); state.ballOwnerId=ownerId;
-}
-
-function physicsStep(state) {
-  // Ball interpolation is independent of player rendering.
-  const dx=state.ballTargetX-state.ballX, dy=state.ballTargetY-state.ballY;
-  const d=Math.hypot(dx,dy);
-  if(d>0.15) {
-    const ballSpeed=state.ballOwnerId ? 1.9 : 5.8;
-    const move=Math.min(d,ballSpeed);
-    state.ballX+=dx/d*move; state.ballY+=dy/d*move;
-    state.ballVX=dx/d*move; state.ballVY=dy/d*move;
-  } else {
-    state.ballX=state.ballTargetX; state.ballY=state.ballTargetY;
-    state.ballVX*=.82; state.ballVY*=.82;
+  if (state.runnerId == null || state.tick - (state.runnerSetTick||0) > 12 || state.runnerTeam !== attackSide) {
+    state.runnerId = pickRunner(attackXI, state);
+    state.runnerSetTick = state.tick;
+    state.runnerTeam = attackSide;
   }
 
-  [state.homeXI,state.awayXI].forEach(xi=>{
-    const side=xi===state.homeXI?'home':'away';
-    const attacking=side===state.possession;
-    const tactics=side==='home'?state.homeTactics:state.awayTactics;
-    xi.forEach(p=>{
-      const target=p.targetX==null?p.baseX:p.targetX;
-      const ty=p.targetY==null?p.baseY:p.targetY;
-      const maxSpeed=.28 + effAttr(p,'pace')*.0042;
-      const dx=target-p.x,dy=ty-p.y,d=Math.hypot(dx,dy)||1;
-      const desiredVx=dx/d*maxSpeed, desiredVy=dy/d*maxSpeed;
-      const steering=.16 + effAttr(p,'acceleration')*.0028;
-      p.vx += (desiredVx-p.vx)*steering;
-      p.vy += (desiredVy-p.vy)*steering;
-      p.vx*=.93; p.vy*=.93;
-      p.x=clamp(p.x+p.vx,2,98); p.y=clamp(p.y+p.vy,2,98);
-      p.fatigue=Math.min(100,p.fatigue + (Math.abs(p.vx)+Math.abs(p.vy))*.006);
-      p.distanceKm=(p.distanceKm||0) + Math.hypot(p.vx*1.05, p.vy*0.68)/1000;
-      // Defensive pressure makes nearby defenders step toward the danger zone.
-      if(!attacking && distance(p,{x:state.ballX,y:state.ballY})<20) {
-        const pressureFactor=(tactics?.pressing?.intensity??55)/100;
-        p.targetX += (state.ballX-p.targetX)*.04*pressureFactor;
-        p.targetY += (state.ballY-p.targetY)*.04*pressureFactor;
-      }
-    });
-  });
-}
+  const moveTo = (p, target, speedCap) => {
+    const dx = target.x - p.x, dy = target.y - p.y;
+    const d = Math.hypot(dx,dy) || 1;
+    const step = Math.min(d, speedCap);
+    p.x = clamp(p.x + (dx/d)*step, 1, 99);
+    p.y = clamp(p.y + (dy/d)*step, 1, 99);
+    p.distanceKm = (p.distanceKm||0) + step*1.05/1000*100;
+  };
 
-function resetShape(state) {
-  // Restore every outfield player (and keeper) to their formation slot —
-  // the real-world equivalent of a restart (kick-off, goal-kick, keeper
-  // gathering the ball). Without this, a player who pushed forward for a
-  // shot stays parked near the box and can immediately shoot again on the
-  // very next decision tick, producing an unrealistic goal-fest.
   [state.homeXI, state.awayXI].forEach(xi => xi.forEach(p => {
-    p.x = p.baseX; p.y = p.baseY; p.targetX = p.baseX; p.targetY = p.baseY; p.action = 'cover';
+    if (p.id === state.ballOwnerId) return;
+    const pace = effAttr(p,'pace')/60;
+    if (p.pos === 'GK') {
+      const gx = p.teamSide==='home' ? clamp(6 + (state.ballX>75?2:0), 2, 12) : clamp(94 - (state.ballX<25?2:0), 88, 98);
+      p.action='cover';
+      moveTo(p, { x: gx, y: clamp(50 + (ball.y-50)*0.25, 38, 62) }, 0.6*pace);
+      return;
+    }
+    if (p.teamSide === defendSide && pressers.has(p.id)) {
+      p.action = 'press';
+      moveTo(p, ball, 1.65*pace);
+      return;
+    }
+    if (p.teamSide === attackSide && p.id === state.runnerId && state.ballX > 15 && state.ballX < 85) {
+      p.action = 'run';
+      moveTo(p, runTarget(p, state), 1.55*pace);
+      return;
+    }
+    p.action = p.teamSide === attackSide ? 'support' : 'cover';
+    moveTo(p, shapeTarget(p, state), 0.95*pace);
   }));
 }
 
-function decisionStep(state) {
-  const attackXI=state.possession==='home'?state.homeXI:state.awayXI;
-  const defendXI=state.possession==='home'?state.awayXI:state.homeXI;
-  const attackT=state.possession==='home'?state.homeTactics:state.awayTactics;
-  const defendT=state.possession==='home'?state.awayTactics:state.homeTactics;
-  const attackName=state.possession==='home'?state.homeName:state.awayName;
-  const carrier=chooseCarrier(attackXI,state);
-  const pressure=pressureAt(carrier,defendXI)*(buildTacticalModel(defendT).pressing.intensity/55);
-  const xGoal=state.possession==='home'?100:0;
-  const goalDistance=Math.abs(xGoal-carrier.x);
+// ============================================================================
+// Ball-in-flight — a pass or shot is a real travelling object, not an
+// instantly-resolved event.
+// ============================================================================
 
-  // Give the carrier ownership so the ball follows him between decision ticks.
-  carrier.action='carrier';
-  carrier.targetX=carrier.x + (xGoal>carrier.x?1:-1)*Math.min(2.2,effAttr(carrier,'pace')/45);
-  carrier.targetY=carrier.y;
-  setBallTarget(state,carrier.x,carrier.y,carrier.id);
+function launchBall(state, from, toX, toY, kind, meta={}) {
+  state.ballOwnerId = null;
+  state.ballInFlight = { fromId: from.id, toX, toY, kind, meta, attempted: new Set(), ticks: 0 };
+}
 
-  // Defensive line and attacking shape are recalculated every decision cycle.
-  attackXI.forEach(p=>{
-    if(p.id===carrier.id) return;
-    const target=chooseRunTarget(p,state,attackXI,defendXI,attackT);
-    const runUtility=effAttr(p,'offBall')*.34+effAttr(p,'pace')*.16+effAttr(p,'decisions')*.15+
-      (goalDistance<35?12:0)-pressure*.18;
-    p.offBallAction = runUtility>48 ? 'run' : 'support';
-    p.action = p.offBallAction;
-    p.targetX=target.x; p.targetY=target.y;
-  });
+function flightStep(state) {
+  const f = state.ballInFlight;
+  f.ticks++;
+  const speed = f.kind === 'shot' ? 7.5 : f.kind === 'through-pass' ? 5.6 : 4.6;
+  const dx = f.toX - state.ballX, dy = f.toY - state.ballY;
+  const d = Math.hypot(dx,dy) || 1;
+  const step = Math.min(d, speed);
+  state.ballX = clamp(state.ballX + (dx/d)*step, 0, 100);
+  state.ballY = clamp(state.ballY + (dy/d)*step, 0, 100);
 
-  // Defenders use grid pressure + attributes to select press, cover and mark roles.
-  const dangerous=outfield(attackXI).map(p=>({p,d:distance(p,{x:state.ballX,y:state.ballY})}))
-    .sort((a,b)=>a.d-b.d).slice(0,3);
-  defendXI.forEach((p,i)=>{
-    if(p.pos==='GK'){p.targetX=p.baseX;p.targetY=p.baseY;return;}
-    const nearestAtt=outfield(attackXI).map(a=>({a,d:distance(p,a)})).sort((a,b)=>a.d-b.d)[0];
-    const canPress=i<3 || distance(p,{x:state.ballX,y:state.ballY})<13;
-    if(canPress && nearestAtt && buildTacticalModel(defendT).pressing.intensity>50) {
-      p.action='press';
-      p.targetX=clamp(state.ballX + (state.possession==='home'?-1.8:1.8),3,97);
-      p.targetY=state.ballY;
-    } else {
-      p.action='cover';
-      const shape=roleSpaceTarget(p,state,false);
-      p.targetX=shape.x; p.targetY=shape.y;
-      if(nearestAtt && distance(nearestAtt.a,p)<10) {
-        p.targetX += (nearestAtt.a.x-p.targetX)*.25;
-        p.targetY += (nearestAtt.a.y-p.targetY)*.25;
+  if (state.ballY <= 0.5 || state.ballY >= 99.5) {
+    log(state, 'The ball goes out for a throw-in.', 'info', null);
+    const throwSide = state.possession === 'home' ? 'away' : 'home';
+    state.possession = throwSide;
+    resetForRestart(state, clamp(state.ballX,4,96), clamp(state.ballY,4,96));
+    return;
+  }
+
+  if (f.kind !== 'shot') {
+    const defendXI = state.possession === 'home' ? state.awayXI : state.homeXI;
+    for (const def of outfield(defendXI)) {
+      if (f.attempted.has(def.id)) continue;
+      if (distance(def, {x:state.ballX,y:state.ballY}) < 5.5) {
+        f.attempted.add(def.id);
+        const chance = clamp(effAttr(def,'anticipation')*.4 + effAttr(def,'positioning')*.2 - 20, 6, 42);
+        if (Math.random()*100 < chance) {
+          def.tackles=(def.tackles||0)+1;
+          state.possession = def.teamSide;
+          state.ballInFlight = null;
+          state.ballOwnerId = def.id;
+          state.possessionChain = 0;
+          state.dribbleTicksLeft = 5;
+          state.dribbleTargetSet = false;
+          log(state, `${def.name} steps in and cuts out the pass.`, 'turnover', def.teamSide);
+          return;
+        }
       }
     }
-  });
+  }
 
-  // Utility decision: shot > through ball > normal pass > carry, based on
-  // attributes, space and tactical context.
-  const inFinalThird=state.possession==='home'?carrier.x>68:carrier.x<32;
-  const shootingRole=['ST','AML','AMR','AMC'].includes(carrier.pos);
-  const shootingUtility=shootingRole
-    ? effAttr(carrier,'finishing')*.34+effAttr(carrier,'composure')*.16+effAttr(carrier,'decisions')*.13+
-      (100-goalDistance)*.42-pressure*.65
+  if (d <= step + 0.5) {
+    if (f.kind === 'shot') { resolveShotArrival(state, f); return; }
+    resolvePassArrival(state, f);
+  }
+}
+
+function resolvePassArrival(state, f) {
+  const side = state.possession;
+  const xi = side === 'home' ? state.homeXI : state.awayXI;
+  const receiver = xi.find(p => p.id === f.meta.receiverId) || outfield(xi).reduce((best,p) =>
+    distance(p,{x:state.ballX,y:state.ballY}) < distance(best,{x:state.ballX,y:state.ballY}) ? p : best, outfield(xi)[0]);
+  state.stats[side].passesAttempted++;
+  const success = Math.random()*100 < f.meta.successChance;
+  state.ballInFlight = null;
+  if (!success) {
+    log(state, `${f.meta.fromName}'s pass is cut out.`, 'turnover', side === 'home' ? 'away' : 'home');
+    const other = side === 'home' ? 'away' : 'home';
+    state.possession = other;
+    const pickUpXI = other === 'home' ? state.homeXI : state.awayXI;
+    const nearest = outfield(pickUpXI).reduce((best,p) => distance(p,{x:state.ballX,y:state.ballY}) < distance(best,{x:state.ballX,y:state.ballY}) ? p : best, outfield(pickUpXI)[0]);
+    state.ballOwnerId = nearest.id;
+    state.possessionChain = 0;
+    state.dribbleTicksLeft = 4;
+    state.dribbleTargetSet = false;
+    return;
+  }
+  receiver.touches=(receiver.touches||0)+1;
+  state.stats[side].passesCompleted++;
+  state.possessionChain = (state.possessionChain||0) + 1;
+  state.ballOwnerId = receiver.id;
+  state.lastPasser = xi.find(p => p.id === f.fromId) || null;
+  state.dribbleTicksLeft = 0;
+  state.dribbleTargetSet = false;
+  log(state, `${f.meta.fromName} finds ${receiver.name}.`, 'play', side);
+}
+
+const GOAL_HALF_WIDTH = 5;
+
+function resolveShotArrival(state, f) {
+  const side = state.possession;
+  const xi = side === 'home' ? state.homeXI : state.awayXI;
+  const defXI = side === 'home' ? state.awayXI : state.homeXI;
+  const attacker = xi.find(p => p.id === f.fromId);
+  const gk = defXI.find(p => p.pos === 'GK');
+  const nearest = outfield(defXI).map(p=>({p,d:distance(p,attacker)})).sort((a,b)=>a.d-b.d).slice(0,3);
+  const pressure = nearest.reduce((s,o)=>s+clamp(18-o.d,0,18),0)/Math.max(1,nearest.length);
+  const xDist = side==='home' ? 100-attacker.x : attacker.x;
+  const tactics = side==='home' ? state.homeTactics : state.awayTactics;
+
+  const onTargetChance = clamp(
+    16 + effAttr(attacker,'technique')*.26 + effAttr(attacker,'composure')*.15 +
+    (100-clamp(xDist,0,100))*.20 - pressure*.85 + (MENTALITY_ATTACK[tactics?.mentality]||0),
+    8, 72
+  );
+  const onTarget = Math.random()*100 < onTargetChance;
+  state.stats[side].shots++;
+  attacker.shots=(attacker.shots||0)+1;
+  attacker.touches=(attacker.touches||0)+1;
+  state.ballInFlight = null;
+
+  if (!onTarget) {
+    state.stats[side].xG = (state.stats[side].xG||0) + (onTargetChance/100)*0.15;
+    log(state, `${attacker.name}'s effort goes wide of the post.`, 'chance', side);
+    state.possession = side==='home'?'away':'home';
+    resetForRestart(state, side==='home'?96:4, 50);
+    return;
+  }
+
+  const placement = Math.random()*GOAL_HALF_WIDTH;
+  const gkQuality = gk ? (effAttr(gk,'positioning')*.3+effAttr(gk,'anticipation')*.3+effAttr(gk,'composure')*.2+effAttr(gk,'decisions')*.2) : 50;
+  const saveChance = clamp(gkQuality*1.5 - placement*7 - (effAttr(attacker,'finishing')-60)*.25, 15, 88);
+  const xg = clamp((onTargetChance/100) * (1-saveChance/100) * 1.3, 0.02, 0.75);
+  state.stats[side].xG = (state.stats[side].xG||0) + xg;
+  state.stats[side].onTarget++;
+
+  if (Math.random()*100 < saveChance) {
+    log(state, `${attacker.name} gets the shot away, but the goalkeeper saves it!`, 'chance', side);
+    if (Math.random()<0.3) {
+      state.stats[side].corners++;
+      log(state, `Saved behind — corner for ${side==='home'?state.homeName:state.awayName}.`, 'setpiece', side);
+      state.possession = side;
+      resetForRestart(state, side==='home'?98:2, Math.random()<0.5?2:98);
+    } else {
+      state.possession = side==='home'?'away':'home';
+      resetForRestart(state, side==='home'?92:8, 50);
+    }
+    return;
+  }
+
+  state.score[side]++;
+  attacker.goals=(attacker.goals||0)+1;
+  const assister = state.lastPasser && state.lastPasser.id!==attacker.id ? state.lastPasser : null;
+  if (assister) assister.assists=(assister.assists||0)+1;
+  state.lastPasser = null;
+  log(state, `${attacker.name} finds the finish... GOAL!`, 'goal', side);
+  state.possession = side==='home' ? 'away' : 'home';
+  resetForRestart(state, 50, 50);
+}
+
+function resetForRestart(state, x, y) {
+  state.ballX = x; state.ballY = y;
+  state.ballInFlight = null;
+  state.possessionChain = 0;
+  state.dribbleTicksLeft = 4;
+  state.dribbleTargetSet = false;
+  [state.homeXI, state.awayXI].forEach(xi => xi.forEach(p => { p.x = p.baseX; p.y = p.baseY; }));
+  const xi = state.possession === 'home' ? state.homeXI : state.awayXI;
+  const nearest = outfield(xi).reduce((best,p) => distance(p,{x,y}) < distance(best,{x,y}) ? p : best, outfield(xi)[0]);
+  state.ballOwnerId = nearest.id;
+}
+
+// ============================================================================
+// Carrier decisions — made ONCE per possession touch, not every tick.
+// ============================================================================
+
+function carrierStep(state) {
+  const side = state.possession;
+  const xi = side === 'home' ? state.homeXI : state.awayXI;
+  const defXI = side === 'home' ? state.awayXI : state.homeXI;
+  const carrier = xi.find(p => p.id === state.ballOwnerId);
+  if (!carrier) { state.ballOwnerId = outfield(xi)[0]?.id ?? xi[0]?.id; return; }
+
+  if (state.dribbleTicksLeft > 0) {
+    if (!state.dribbleTargetSet) {
+      const dir = side === 'home' ? 1 : -1;
+      state.dribbleTarget = { x: clamp(carrier.x + dir*6, 4, 96), y: clamp(carrier.y + (Math.random()-0.5)*8, 4, 96) };
+      state.dribbleTargetSet = true;
+    }
+    const dx = state.dribbleTarget.x - carrier.x, dy = state.dribbleTarget.y - carrier.y;
+    const d = Math.hypot(dx,dy) || 1;
+    const step = Math.min(d, 1.3*(effAttr(carrier,'pace')/70));
+    carrier.x = clamp(carrier.x + (dx/d)*step, 1, 99);
+    carrier.y = clamp(carrier.y + (dy/d)*step, 1, 99);
+    carrier.action = 'carrier';
+    state.ballX = carrier.x; state.ballY = carrier.y;
+
+    const presser = outfield(defXI).find(d => state.pressers?.includes(d.id) && d.tackleCooldown<=0 && distance(d,carrier)<3.2);
+    if (presser) {
+      presser.tackleCooldown = 14;
+      const win = clamp(30 + (effAttr(presser,'tackling')-effAttr(carrier,'dribbling'))*.5 + (effAttr(presser,'aggression')-50)*.15, 8, 78);
+      if (Math.random()*100 < win*0.10) {
+        state.stats[side==='home'?'away':'home'].fouls++;
+        log(state, `${presser.name} fouls ${carrier.name}.`, 'foul', side==='home'?'away':'home');
+        state.dribbleTicksLeft = 5; state.dribbleTargetSet = false;
+        return;
+      }
+      if (Math.random()*100 < win) {
+        presser.tackles=(presser.tackles||0)+1;
+        state.possession = presser.teamSide;
+        state.ballOwnerId = presser.id;
+        state.possessionChain = 0;
+        state.dribbleTicksLeft = 5; state.dribbleTargetSet = false;
+        log(state, `${presser.name} wins the ball off ${carrier.name}.`, 'turnover', presser.teamSide);
+        return;
+      }
+    }
+    [state.homeXI,state.awayXI].forEach(t=>t.forEach(p=>{ if(p.tackleCooldown>0) p.tackleCooldown--; }));
+    state.dribbleTicksLeft--;
+    return;
+  }
+
+  carrier.touches = (carrier.touches||0)+1;
+  const xGoal = side==='home' ? 100 : 0;
+  const goalDistance = Math.abs(xGoal-carrier.x);
+  const inFinalThird = side==='home' ? carrier.x>68 : carrier.x<32;
+  const nearest = outfield(defXI).map(p=>({p,d:distance(p,carrier)})).sort((a,b)=>a.d-b.d).slice(0,3);
+  const pressure = nearest.reduce((s,o)=>s+clamp(18-o.d,0,18),0)/Math.max(1,nearest.length);
+
+  const shootingRole = ['ST','AML','AMR','AMC'].includes(carrier.pos);
+  const shootingUtility = shootingRole
+    ? effAttr(carrier,'finishing')*.30+effAttr(carrier,'composure')*.14+effAttr(carrier,'decisions')*.10+(100-goalDistance)*.22-pressure*.9
     : -999;
 
-  const receiver=chooseReceiver(carrier,attackXI,defendXI,state,attackT);
-  const passUtility=receiver?scorePass(carrier,receiver,defendXI,state,attackT):-999;
-  const runReceiver=receiver && receiver.offBallAction==='run';
-  const passThreshold=passUtility + effAttr(carrier,'vision')*.08 - pressure*.55;
+  const teammates = outfield(xi).filter(p=>p.id!==carrier.id);
+  let bestReceiver = null, bestScore = -1e9;
+  teammates.forEach(p => {
+    const score = effAttr(p,'offBall')*.2 + (side==='home'?p.x-carrier.x:carrier.x-p.x)*.6 - distance(p,carrier)*.3 + Math.random()*10;
+    if (score > bestScore) { bestScore = score; bestReceiver = p; }
+  });
+  const passThreshold = bestReceiver ? (effAttr(carrier,'vision')*.35 + effAttr(carrier,'passing')*.25 - pressure*.55 + Math.random()*20) : -999;
 
-  if(inFinalThird && state.possessionChain>=2 && shootingUtility>66 && shootingUtility>passThreshold+10) {
+  if (inFinalThird && (state.possessionChain||0)>=2 && shootingUtility>60 && shootingUtility>passThreshold+8) {
     carrier.action='shoot';
-    state.phase='attack';
-    state.currentAction={type:'shot',playerId:carrier.id};
-    setBallTarget(state,xGoal,clamp(carrier.y+(Math.random()-.5)*4,5,95),carrier.id);
-    log(state,`${carrier.name} shapes to shoot.`,'play',state.possession);
+    log(state, `${carrier.name} shapes to shoot.`, 'play', side);
+    launchBall(state, carrier, xGoal, clamp(carrier.y+(Math.random()-0.5)*6,10,90), 'shot');
     return;
   }
 
-  if(receiver && passThreshold>48) {
-    const through=runReceiver && Math.abs((state.possession==='home'?receiver.x-carrier.x:carrier.x-receiver.x))>5;
-    carrier.action=through?'through-pass':'pass';
-    state.phase=through?'transition':'build-up';
-    state.currentAction={type:through?'through-pass':'pass',playerId:carrier.id,targetId:receiver.id};
-    const lead=through ? 3.8+effAttr(receiver,'pace')/35 : 1.2;
-    const dir=state.possession==='home'?1:-1;
-    const tx=clamp(receiver.x+dir*lead,3,97);
-    setBallTarget(state,tx,receiver.y,receiver.id);
-    if(through) log(state,`${receiver.name} begins a run in behind — ${carrier.name} plays it through.`,'play',state.possession);
+  if (bestReceiver && passThreshold>40) {
+    const through = Math.abs((side==='home'?bestReceiver.x-carrier.x:carrier.x-bestReceiver.x))>8 && Math.random()<0.3;
+    const successChance = clamp(60 + effAttr(carrier,'passing')*.3 - pressure*.7 - distance(carrier,bestReceiver)*.15, 35, 94);
+    log(state, `${carrier.name} looks to find ${bestReceiver.name}.`, 'play', side);
+    launchBall(state, carrier, bestReceiver.x, bestReceiver.y, through?'through-pass':'pass', { receiverId: bestReceiver.id, fromName: carrier.name, successChance });
     return;
   }
 
-  // Carry/dribble into the best available cell when passing is not worthwhile.
-  carrier.action='carry';
-  state.phase='transition';
-  state.currentAction={type:'carry',playerId:carrier.id};
-  const dir=state.possession==='home'?1:-1;
-  carrier.targetX=clamp(carrier.x+dir*(2.5+effAttr(carrier,'dribbling')/55),3,97);
-  carrier.targetY=clamp(carrier.y+(Math.random()-.5)*2.5,4,96);
-  setBallTarget(state,carrier.targetX,carrier.targetY,carrier.id);
+  state.dribbleTicksLeft = 3 + Math.floor(Math.random()*3);
+  state.dribbleTargetSet = false;
+  carrier.action = 'carrier';
 }
 
-function collisionAndEventStep(state) {
-  const attackXI=state.possession==='home'?state.homeXI:state.awayXI;
-  const defendXI=state.possession==='home'?state.awayXI:state.homeXI;
-  const attackT=state.possession==='home'?state.homeTactics:state.awayTactics;
-  const defendT=state.possession==='home'?state.awayTactics:state.homeTactics;
-  const defendSide=state.possession==='home'?'away':'home';
-  const carrier=attackXI.find(p=>p.id===state.ballOwnerId) || chooseCarrier(attackXI,state);
-  const defenders=nearestDefenders(carrier,defendXI,3);
-
-  // Ball has reached a receiver/carrier: resolve the action.
-  if(state.currentAction && state.currentAction.targetId && state.ballOwnerId===state.currentAction.targetId &&
-     distance(carrier,{x:state.ballX,y:state.ballY})<4) {
-    log(state,`${state.currentAction.type==='through-pass'?'Through ball':'Pass'} reaches ${carrier.name}.`,'play',state.possession);
-    state.possessionChain++;
-    state.stats[state.possession].passesAttempted++;
-    state.stats[state.possession].passesCompleted++;
-    carrier.touches=(carrier.touches||0)+1;
-    carrier.passesCompleted=(carrier.passesCompleted||0)+1;
-    state.lastPasser=attackXI.find(p=>p.id===state.currentAction.playerId) || null;
-    state.currentAction=null;
-  }
-
-  // Press/tackle/interception resolution.
-  // nearestDefenders() returns {d: <player>, dist: <number>}. Reading .dist
-  // here (a real fix) re-enables proximity tackle duels, but that surfaced a
-  // separate cascading instability that inflated shot volume ~6x in testing
-  // (see engine notes). Reading .d keeps this block permanently non-firing,
-  // preserving the well-tested realistic scoreline behavior. Turnovers still
-  // happen via interception-while-travelling below; proximity tackles/fouls
-  // specifically are a known gap, not a silent bug.
-  const close=defenders[0]?.d;
-  if(close!=null && close<4.6 && state.currentAction?.type!=='shot') {
-    const tackler=selectDefender(defendXI,carrier,state);
-    const tackleUtility=effAttr(tackler,'tackling')*.42+effAttr(tackler,'anticipation')*.22+effAttr(tackler,'aggression')*.10+
-      effAttr(tackler,'decisions')*.12+buildTacticalModel(defendT).pressing.intensity*.10-distance(tackler,carrier)*2.4;
-    const controlUtility=effAttr(carrier,'technique')*.25+effAttr(carrier,'dribbling')*.28+effAttr(carrier,'strength')*.12+
-      effAttr(carrier,'decisions')*.18+effAttr(carrier,'pace')*.08;
-    // A small independent share of contested duels are adjudged fouls rather
-    // than clean challenges — tracked as a real stat, not just flavour text.
-    if(Math.random()<0.10) {
-      state.stats[defendSide].fouls++;
-      log(state,`${tackler.name} fouls ${carrier.name}.`,'foul',defendSide);
-      return;
-    }
-    if(Math.random()*100 < clamp(34+(tackleUtility-controlUtility)*.48,8,82)) {
-      log(state,`${tackler.name} wins the duel with ${carrier.name}.`,'turnover',defendSide);
-      tackler.tackles=(tackler.tackles||0)+1;
-      state.stats[state.possession].passesAttempted++;
-      state.possession=defendSide;
-      state.ballOwnerId=tackler.id; state.ballX=tackler.x; state.ballY=tackler.y;
-      state.ballTargetX=tackler.x; state.ballTargetY=tackler.y;
-      state.currentAction=null; state.possessionChain=0;
-      return;
-    }
-  }
-
-  if(state.currentAction?.type==='shot' && state.ballOwnerId===carrier.id &&
-     distance({x:state.ballX,y:state.ballY},{x:state.ballTargetX,y:state.ballTargetY})<4) {
-    const gk=defendXI.find(p=>p.pos==='GK');
-    const outcome=resolveShot(carrier,gk,defendXI,state,attackT);
-    log(state,outcome.text,outcome.goal?'goal':'chance',state.possession);
-    state.stats[state.possession].shots++;
-    state.stats[state.possession].xG = (state.stats[state.possession].xG||0) + outcome.xg;
-    carrier.shots=(carrier.shots||0)+1;
-    carrier.touches=(carrier.touches||0)+1;
-    if(outcome.goal || outcome.onTarget) state.stats[state.possession].onTarget++;
-    if(outcome.goal) {
-      state.score[state.possession]++;
-      state.lastEventPlayer=carrier.id;
-      carrier.goals=(carrier.goals||0)+1;
-      const assister=state.lastPasser && state.lastPasser.id!==carrier.id ? state.lastPasser : null;
-      if(assister) assister.assists=(assister.assists||0)+1;
-      state.lastPasser=null;
-    } else if(!outcome.onTarget && Math.random()<0.35) {
-      // A share of blocked/deflected efforts go behind for a corner rather
-      // than a clean goal-kick — real corners overwhelmingly originate from
-      // shots and crosses that take a deflection, not the ball drifting all
-      // the way to the byline on its own.
-      state.stats[state.possession].corners++;
-      log(state,`Deflected behind — corner for ${state.possession==='home'?state.homeName:state.awayName}.`,'setpiece',state.possession);
-    }
-    state.possession=defendSide;
-    state.ballOwnerId=null;
-    state.currentAction=null;
-    state.ballX=50; state.ballY=50;
-    state.ballTargetX=50; state.ballTargetY=50;
-    state.possessionChain=0;
-    resetShape(state);
-    return;
-  }
-
-  // Interception while the ball is travelling through a spatially occupied cell.
-  if(!state.ballOwnerId && state.currentAction?.targetId) {
-    const idx=gridIndex(state.ballX,state.ballY);
-    const cell=state.spatial?.grid?.[idx];
-    const defendingInfluence=state.possession==='home'?cell?.away||0:cell?.home||0;
-    const receiver=attackXI.find(p=>p.id===state.currentAction.targetId);
-    const defender=selectDefender(defendXI,{x:state.ballX,y:state.ballY},state);
-    const interceptionChance=clamp(.018*defendingInfluence + (defender?effAttr(defender,'anticipation')/1200:0),.02,.30);
-    if(receiver && defender && Math.random()<interceptionChance) {
-      log(state,`${defender.name} reads the pass and intercepts.`,'turnover',defendSide);
-      state.stats[state.possession].passesAttempted++;
-      defender.tackles=(defender.tackles||0)+1;
-      state.possession=defendSide;
-      state.ballOwnerId=defender.id;
-      state.ballX=defender.x; state.ballY=defender.y;
-      state.ballTargetX=defender.x; state.ballTargetY=defender.y;
-      state.currentAction=null; state.possessionChain=0;
-    }
-  }
-
-  // Keep the ball from becoming stuck. A share of these are deflections
-  // behind the byline (corners) rather than clean goal-kicks/throw-ins.
-  if(state.ballX<=1 || state.ballX>=99 || state.ballY<=1 || state.ballY>=99) {
-    const isByline = state.ballX<=1 || state.ballX>=99;
-    if(isByline && Math.random()<0.4) {
-      state.stats[state.possession].corners++;
-      log(state,`Corner kick for ${state.possession==='home'?state.homeName:state.awayName}.`,'setpiece',state.possession);
-    } else {
-      log(state,'The ball goes out of play.','info',null);
-    }
-    state.possession=defendSide;
-    state.ballX=50; state.ballY=50; state.ballTargetX=50; state.ballTargetY=50;
-    state.ballOwnerId=null; state.currentAction=null; state.possessionChain=0;
-    resetShape(state);
-  }
-}
+// ============================================================================
+// Late-game tactical shifts (score-aware).
+// ============================================================================
 
 function maybeTriggerDecision(state) {
-  if(state.pendingDecision) return;
-  const diff=state.score.home-state.score.away;
-  const minute=state.minute;
-  if(minute>=55 && diff<0 && !state.__homeChasing){
+  const diff = state.score.home-state.score.away;
+  const minute = state.minute;
+  if (minute>=55 && diff<0 && !state.__homeChasing) {
     state.__homeChasing=true;
-    state.homeTactics={...state.homeTactics,mentality:'Attacking',tempo:Math.min(82,(state.homeTactics.tempo||55)+12),
-      pressing:{intensity:Math.min(90,(state.homeTactics.pressing?.intensity||55)+15)}};
-    log(state,`${state.homeName} increase the tempo and press higher as they chase the game.`,'decision');
+    state.homeTactics={...state.homeTactics,mentality:'Attacking',tempo:Math.min(82,(state.homeTactics.tempo||55)+12)};
+    log(state,`${state.homeName} push forward as they chase the game.`,'decision');
   }
-  if(minute>=55 && diff>0 && !state.__awayChasing){
+  if (minute>=55 && diff>0 && !state.__awayChasing) {
     state.__awayChasing=true;
-    state.awayTactics={...state.awayTactics,mentality:'Attacking',tempo:Math.min(82,(state.awayTactics.tempo||55)+12),
-      pressing:{intensity:Math.min(90,(state.awayTactics.pressing?.intensity||55)+15)}};
-    log(state,`${state.awayName} increase the tempo and press higher as they chase the game.`,'decision');
+    state.awayTactics={...state.awayTactics,mentality:'Attacking',tempo:Math.min(82,(state.awayTactics.tempo||55)+12)};
+    log(state,`${state.awayName} push forward as they chase the game.`,'decision');
   }
-  if(minute>=72 && diff>0 && !state.__homeProtecting){
+  if (minute>=75 && diff>0 && !state.__homeProtecting) {
     state.__homeProtecting=true;
-    state.homeTactics={...state.homeTactics,mentality:'Positive',tempo:Math.min(78,state.homeTactics.tempo||55),
-      pressing:{intensity:Math.min(88,(state.homeTactics.pressing?.intensity||55)+8)}};
-    log(state,`${state.homeName} protect the lead with a more controlled approach.`,'decision');
+    state.homeTactics={...state.homeTactics,mentality:'Positive'};
+    log(state,`${state.homeName} sit in a little to protect the lead.`,'decision');
   }
-  if(minute>=72 && diff<0 && !state.__awayProtecting){
+  if (minute>=75 && diff<0 && !state.__awayProtecting) {
     state.__awayProtecting=true;
-    state.awayTactics={...state.awayTactics,mentality:'Positive',tempo:Math.min(78,state.awayTactics.tempo||55),
-      pressing:{intensity:Math.min(88,(state.awayTactics.pressing?.intensity||55)+8)}};
-    log(state,`${state.awayName} push more players forward.`,'decision');
-  }
-  if(minute>=80 && diff<0 && !state.__awayAllIn){
-    state.__awayAllIn=true;
-    state.awayTactics={...state.awayTactics,mentality:'Very Attacking',tempo:88,pressing:{intensity:92}};
-    log(state,`${state.awayName} go Very Attacking for the final stages.`,'decision');
-  }
-  if(minute>=80 && diff>0 && !state.__homeAllIn){
-    state.__homeAllIn=true;
-    state.homeTactics={...state.homeTactics,mentality:'Very Defensive',tempo:45,pressing:{intensity:72}};
-    log(state,`${state.homeName} drop deeper to defend the lead.`,'decision');
+    state.awayTactics={...state.awayTactics,mentality:'Positive'};
+    log(state,`${state.awayName} sit in a little to protect the lead.`,'decision');
   }
 }
 
-export function resolveDecision(state,optionKey) { state.pendingDecision=null; return state; }
+// ============================================================================
+// Public API
+// ============================================================================
 
-// One and only one fixed simulation tick. The optional interval parameter is
-// retained for API compatibility but is no longer tied to rendering.
+export function initMatch({ homeXI, awayXI, homeName, awayName, homeTactics, awayTactics }) {
+  const state = {
+    minute:0, second:0, possession:'home', phase:'build-up', tick:0,
+    ballX:50, ballY:50, ballInFlight:null,
+    ballOwnerId: outfield(homeXI)[Math.floor(outfield(homeXI).length/2)]?.id ?? homeXI[0]?.id,
+    dribbleTicksLeft:3, dribbleTargetSet:false,
+    score:{home:0,away:0}, homeName, awayName,
+    homeXI, awayXI, homeTactics, awayTactics,
+    events:[{minute:0,second:0,text:'Kick-off.',type:'info',team:null}],
+    pendingDecision:null, finished:false,
+    possessionChain:0, lastPasser:null,
+    runnerId:null, runnerSetTick:0, runnerTeam:null, pressers:[],
+    stats: {
+      home: { shots:0, onTarget:0, corners:0, fouls:0, passesAttempted:0, passesCompleted:0, xG:0 },
+      away: { shots:0, onTarget:0, corners:0, fouls:0, passesAttempted:0, passesCompleted:0, xG:0 },
+    },
+    possessionTicks: { home:0, away:0 },
+    territoryTicks: { home:0, away:0 },
+  };
+  [state.homeXI, state.awayXI].forEach(xi => xi.forEach(p => { p.x = p.baseX; p.y = p.baseY; }));
+  return state;
+}
+
+export function resolveDecision(state, optionKey) { state.pendingDecision=null; return state; }
+
 export function stepMatch(state, decisionInterval=7) {
-  if(state.finished || state.pendingDecision) return state;
+  if (state.finished || state.pendingDecision) return state;
 
   state.tick += 1;
-  state.phaseTick += 1;
   state.second += FIXED_GAME_SECONDS;
-  if(state.second>=60){ state.second-=60; state.minute += 1; }
+  if (state.second>=60) { state.second-=60; state.minute+=1; }
 
-  state.possessionTicks[state.possession] = (state.possessionTicks[state.possession]||0) + 1;
+  state.possessionTicks[state.possession] = (state.possessionTicks[state.possession]||0)+1;
   const territorySide = state.ballX>=50 ? 'home' : 'away';
-  state.territoryTicks[territorySide] = (state.territoryTicks[territorySide]||0) + 1;
+  state.territoryTicks[territorySide] = (state.territoryTicks[territorySide]||0)+1;
 
-  // Fixed 50 ms simulation loop: perception -> decision -> physics -> collision.
-  perceive(state);
-  if(state.tick % Math.max(1,decisionInterval) === 0 || !state.currentAction) {
-    // Never re-decide while a shot is already in flight — it needs to
-    // resolve (or be blocked/intercepted) on its own, not get silently
-    // replaced by a fresh decision every few ticks.
-    if(state.currentAction?.type !== 'shot') decisionStep(state);
+  const eventsBefore = state.events;
+
+  movementStep(state);
+  if (state.ballInFlight) flightStep(state);
+  else carrierStep(state);
+
+  if (state.events === eventsBefore) {
+    log(state, 'Play continues.', 'play', null);
   }
-  physicsStep(state);
-  perceive(state);
-  collisionAndEventStep(state);
+
   maybeTriggerDecision(state);
 
-  if(state.minute>=90) {
+  if (state.minute>=90) {
     state.finished=true;
     log(state,`Full-time: ${state.homeName} ${state.score.home} - ${state.score.away} ${state.awayName}.`,'info',null);
   }
@@ -758,6 +611,6 @@ export function stepMatch(state, decisionInterval=7) {
 
 export function simulateInstant(initialState) {
   let s={...initialState}, guard=0;
-  while(!s.finished && guard<11000){ s=stepMatch(s,7); guard++; }
+  while (!s.finished && guard<20000) { s = stepMatch(s,7); guard++; }
   return s;
 }

@@ -44,7 +44,7 @@ export default function GlobalSearch({ open, onClose, navigateTo }) {
   const results = useMemo(() => {
     if (!q) return null;
     const ownPlayers = roster.filter(p => p.name.toLowerCase().includes(q)).slice(0, 5)
-      .map(p => ({ key: `own-${p.id}`, label: p.name, sub: `${p.displayPos} · Man Utd`, action: () => openProfileFor(mapRosterPlayer(p)) }));
+      .map(p => ({ key: `own-${p.id}`, label: p.name, sub: `${p.displayPos} · Man Utd`, action: () => openProfileFor(mapRosterPlayer(p), 'Search') }));
     const rivalPlayers = worldPlayers.filter(p => p.name.toLowerCase().includes(q)).slice(0, 5)
       .map(p => ({ key: `world-${p.id}`, label: p.name, sub: `${p.pos} · ${p.club}`, action: () => { setSelectedId(p.id); setProfileOpen(true); } }));
     const players = [...ownPlayers, ...rivalPlayers].slice(0, 6);

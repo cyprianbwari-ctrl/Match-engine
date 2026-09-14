@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import "./scouting.css";
 import { useStaffData } from "./store/StaffContext.jsx";
+import { useTransfersData } from "./store/TransfersContext.jsx";
+import { useWorldData } from "./store/WorldContext.jsx";
 
 // Real-world identity/current-club data is kept separate from FAMILY26 game ratings.
 // Current-season numbers shown in the selected-player panel are real football statistics.
@@ -71,7 +73,7 @@ function MiniPitch() {
   return <div className="mini-pitch"><div className="mini-center"/><i/><i/><i/><i/><i/><i/></div>;
 }
 
-function PlayerDetail({ player, onShortlist, shortlisted }) {
+function PlayerDetail({ player, onShortlist, shortlisted, onMakeOffer, onViewProfile }) {
   const [tab,setTab] = useState("Overview");
   return <section className="scout-panel detail-panel">
     <div className="detail-hero"><Portrait player={player} large/><div><h2>{player.name}</h2><span>{player.pos} &nbsp;|&nbsp; Age {player.age} &nbsp;|&nbsp; {player.nat} {player.country}</span></div><b className="club-badge">{player.club}</b></div>
@@ -80,7 +82,8 @@ function PlayerDetail({ player, onShortlist, shortlisted }) {
       <div className="detail-section"><div className="ability-row"><span>Current Ability</span><b>★★★★<i>★</i></b><strong>{player.ovr}</strong></div><div className="ability-row"><span>Potential Ability</span><b>★★★★★</b><strong>{player.pot}</strong></div><div className="detail-line"><span>Value</span><b>{player.stats.value}</b></div><div className="detail-line"><span>Real-life season</span><b>{player.stats.apps} apps · {player.stats.goals} goals · {player.stats.assists} assists</b></div><div className="detail-line"><span>Minutes</span><b>{player.stats.mins}</b></div><div className="detail-line"><span>Preferred foot</span><b>{player.stats.foot}</b></div>{player.injury&&<div className="injury-note"><CircleDot size={14}/>{player.injury}</div>}</div>
       <div className="detail-attributes"><MiniPitch/><div><h3>Key Attributes</h3>{[["Finishing",player.id===2?94:88],["Composure",player.id===2?90:84],["Pace",player.id===2?94:90],["Strength",player.id===2?92:86],["Work Rate",player.id===2?88:82]].map(([n,v])=><div key={n}><span>{n}</span><b>{v}</b></div>)}<p>Source stats update from current real-world competition data.</p></div></div>
     </> : tab === "Attributes" ? <div className="attribute-grid">{["Finishing","Pace","Acceleration","Dribbling","Passing","Vision","Composure","Strength","Heading","Off The Ball","Work Rate","Ball Control"].map((x,i)=><div key={x}><span>{x}</span><b>{[94,94,96,91,78,82,90,92,88,93,86,92][i]}</b></div>)}</div> : <div className="report-full"><strong>{player.recommendation}</strong><p>{player.report}</p><p>Scout: {player.scout} · {player.date}</p>{player.injury&&<p>{player.injury}</p>}</div>}
-    <div className="detail-actions"><button className="lime-action" onClick={onShortlist}><Star size={15} fill="currentColor"/>{shortlisted?"Shortlisted":"Add to Shortlist"}</button><button className="purple-action">Make Offer <ChevronRight size={16}/></button></div>
+    <div className="detail-actions"><button className="lime-action" onClick={onShortlist}><Star size={15} fill="currentColor"/>{shortlisted?"Shortlisted":"Add to Shortlist"}</button><button className="purple-action" onClick={onMakeOffer}>Make Offer <ChevronRight size={16}/></button></div>
+    <button className="lime-action" style={{width:'100%',marginTop:8}} onClick={onViewProfile}><UserRound size={15}/>View Full Profile</button>
   </section>;
 }
 
@@ -127,6 +130,8 @@ function AssignmentsBoard() {
 }
 
 function ScoutingScreen({ setActive }) {
+  const { market, addTarget, makeOffer } = useTransfersData();
+  const { openProfileFor } = useWorldData();
   const [tab,setTab]=useState("Scouting");
   const [position,setPosition]=useState("All Positions");
   const [age,setAge]=useState("All Ages");
@@ -168,7 +173,18 @@ function ScoutingScreen({ setActive }) {
     <div className="scouting-columns">
       <div className="scouting-left"><ScoutTable players={tabFiltered} selected={selected} setSelected={p=>{setSelected(p);setShortlisted(p.status==="Shortlist")}} page={page} setPage={setPage}/><div className="scouting-bottom"><MyScouts/><WorldScouting/></div></div>
       <div className="scouting-middle"><Reports players={tab==="Scout Reports"?tabFiltered:scoutPlayers} setSelected={p=>{setSelected(p);setShortlisted(p.status==="Shortlist")}}/></div>
-      <div className="scouting-right"><PlayerDetail player={selected} shortlisted={shortlisted} onShortlist={()=>setShortlisted(true)}/></div>
+      <div className="scouting-right"><PlayerDetail player={selected} shortlisted={shortlisted} onShortlist={()=>{setShortlisted(true); const m=market.find(mp=>mp.name===selected.name); if(m) addTarget(m.id);}} onMakeOffer={()=>{const m=market.find(mp=>mp.name===selected.name); if(m) makeOffer(m.id, Math.round(m.asking*0.9)); setActive('Transfers');}} onViewProfile={()=>{
+        const m=market.find(mp=>mp.name===selected.name);
+        if (m) { openProfileFor(m, 'Scouting'); return; }
+        openProfileFor({
+          id:`scout-${selected.id}`, name:selected.name, nat:selected.nat, country:selected.country, pos:selected.pos,
+          club:selected.club, league:selected.league, age:selected.age, rating:selected.ovr, potential:selected.pot,
+          value:selected.stats?.value, wage:'—', contractExpiry:'—', preferredFoot:selected.stats?.foot||'Right',
+          reputation:'Continental', tacticalRole:selected.pos, availability:'Not for Sale',
+          career:[{season:'2025/26',club:selected.club,apps:selected.stats?.apps||0,goals:selected.stats?.goals||0,assists:selected.stats?.assists||0}],
+          recentResults:['W','D','W','W','L'], isOwn:false,
+        }, 'Scouting');
+      }}/></div>
     </div>
   </div>;
 }

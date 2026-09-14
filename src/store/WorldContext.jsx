@@ -15,8 +15,10 @@ export function WorldProvider({ children }) {
   const [shortlist, setShortlist] = useState([]);
   const [scouted, setScouted] = useState([]);
   const [customPlayer, setCustomPlayer] = useState(null);
-  const openProfileFor = useCallback((playerObj) => {
+  const [profileSource, setProfileSource] = useState('World');
+  const openProfileFor = useCallback((playerObj, source = 'World') => {
     setCustomPlayer(playerObj);
+    setProfileSource(source);
     setProfileOpen(true);
   }, []);
   const closeProfile = useCallback(() => {
@@ -101,7 +103,7 @@ export function WorldProvider({ children }) {
 
   const value = {
     players, rankingMode, setRankingMode, rankingScope, setRankingScope, rankedList,
-    selectedId, setSelectedId: setSelectedId2, selectedPlayer, profileOpen, setProfileOpen: closeProfileAware,
+    selectedId, setSelectedId: setSelectedId2, selectedPlayer, profileOpen, profileSource, setProfileOpen: closeProfileAware,
     shortlist, toggleShortlist, scouted, addScout, openProfileFor, closeProfile,
     filters, setFilters, searchResults,
     leagues, wonderkids, transferActivity, reputationMovers, availablePlayers,

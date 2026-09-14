@@ -91,7 +91,7 @@ function SquadSnapshotCard({ goTo }) {
   const { openProfileFor } = useWorldData();
   const openPlayer = (rosterId) => {
     const rp = roster.find(r => r.id === rosterId);
-    if (rp) openProfileFor(mapRosterPlayer(rp));
+    if (rp) openProfileFor(mapRosterPlayer(rp), 'Home');
   };
   const s = squadSnapshot;
   return <section className="home-card">
