@@ -21,6 +21,8 @@ import { PlayerProfileModal } from "./World.jsx";
 import ClubScreen from "./Club.jsx";
 import MatchScreen from "./Match.jsx";
 import GlobalSearch from "./GlobalSearch.jsx";
+import SimulationWindow from "./SimulationWindow.jsx";
+import MatchdayScreen from "./Matchday.jsx";
 import { StaffProvider } from "./store/StaffContext.jsx";
 import { CompetitionProvider, useCompetitionData } from "./store/CompetitionContext.jsx";
 import { CommunicationProvider, useCommunicationData } from "./store/CommunicationContext.jsx";
@@ -51,21 +53,24 @@ function Header({ onMenuClick, onSearchClick, setActive }) {
   const oppShort = fixture ? (fixture.home === 'Man Utd' ? fixture.away : fixture.home) : '—';
 
   const handleContinue = () => {
-    sim.continueGame({ addMessage, addNews, simulateMatchday });
+    if (sim.phase === 'matchday') { setActive('Matchday'); return; }
+    sim.openSimWindow();
   };
 
   return <header className="topbar">
     <button className="menu-btn" onClick={onMenuClick}><Menu size={26}/></button>
-    <div className="brand"><div><b>FAMILY<span>26</span></b><small>BIGGER STRONGER TOGETHER</small></div></div>
+    <button className="brand" onClick={()=>!sim.matchLocked && setActive('Home')} style={sim.matchLocked?{cursor:'default'}:undefined}><div><b>FAMILY<span>26</span></b><small>BIGGER STRONGER TOGETHER</small></div></button>
     <div className="club-head"><Crest/><div><strong>Manchester United</strong><span>Manager: Cyprian</span></div></div>
     <div className="competition-head"><Trophy size={21}/><div><strong>Premier League</strong><span>🏴 England</span></div></div>
     <div className="header-spacer"/>
     <div className="date-block"><CalendarDays size={17}/><div>{sim.dateLabel}<span>{sim.timeLabel}</span></div></div>
-    <div className="status-pill"><i className={sim.gameStatus.pulse ? 'pulse' : ''} style={{background:sim.gameStatus.color}}/><span style={{color:sim.gameStatus.color}}>{sim.gameStatus.label}</span></div>
-    {!sim.liveMatch && <button className="cloud-save-block"><Cloud size={19}/><div>Cloud Save<span>Saved {sim.lastSavedAt}</span></div></button>}
-    <button className="search-btn" onClick={onSearchClick}><Search size={21}/></button>
-    <div className="bell"><Bell size={21}/>{unreadCount>0 && <i>{unreadCount}</i>}</div>
-    {sim.liveMatch
+    <div className="status-pill"><i className={sim.gameStatus.pulse ? 'pulse' : ''} style={{background:sim.gameStatus.color}}/><span style={{color:sim.gameStatus.color}}>{sim.matchLocked ? 'Match In Progress' : sim.gameStatus.label}</span></div>
+    {!sim.liveMatch && !sim.matchLocked && <button className="cloud-save-block"><Cloud size={19}/><div>Cloud Save<span>Saved {sim.lastSavedAt}</span></div></button>}
+    <button className="search-btn" onClick={onSearchClick} disabled={sim.matchLocked} style={sim.matchLocked?{opacity:.35,cursor:'default'}:undefined}><Search size={21}/></button>
+    <div className="bell"><Bell size={21}/>{unreadCount>0 && !sim.matchLocked && <i>{unreadCount}</i>}</div>
+    {sim.matchLocked
+      ? <button className="view-match-btn" disabled><Tv size={16}/> In Match</button>
+      : sim.liveMatch
       ? <button className="view-match-btn" onClick={()=>setActive('Match')}><Tv size={16}/> View Match</button>
       : <button className="continue" onClick={handleContinue}><Play size={15} fill="currentColor"/> Continue <small>Next: {sim.phase==='matchday' ? oppShort : sim.nextLabel}</small></button>}
   </header>
@@ -73,10 +78,16 @@ function Header({ onMenuClick, onSearchClick, setActive }) {
 
 function Sidebar({active,setActive,collapsed}) {
   const { unreadCount } = useCommunicationData();
-  return <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+  const sim = useSimulation();
+  return <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${sim.matchLocked ? 'sidebar-locked' : ''}`} inert={sim.matchLocked || undefined}>
     {nav.map(([label,Icon])=><button key={label} className={active===label?"active":""} onClick={()=>setActive(label)}><Icon size={21}/><span>{label}</span>{label==="Communications"&&unreadCount>0&&<em>{unreadCount}</em>}</button>)}
     <div className="slogan">BIGGER<br/>STRONGER<br/><span>TOGETHER</span></div>
   </aside>
+}
+
+function MainArea({ children }) {
+  const sim = useSimulation();
+  return <main className={sim.simWindowOpen ? 'main-disabled' : ''} inert={sim.simWindowOpen || undefined}>{children}</main>;
 }
 
 function App() {
@@ -88,7 +99,7 @@ function App() {
   return <StaffProvider><CompetitionProvider><CommunicationProvider><WorldProvider><ClubProvider><TrainingProvider><TacticsProvider><TransfersProvider><SimulationProvider onGoToMatch={()=>setActive('Match')}><div className="app">
     <Header onMenuClick={()=>setSidebarCollapsed(c=>!c)} onSearchClick={()=>setSearchOpen(true)} setActive={setActive}/>
     <Sidebar active={active} setActive={setActive} collapsed={sidebarCollapsed}/>
-    <main>
+    <MainArea>
       {active==="Home"
         ? <HomeDashboard setActive={setActive}/>
         : active==="Squad"
@@ -113,9 +124,12 @@ function App() {
                   ? <ClubScreen setActive={setActive}/>
                 : active==="Match"
                   ? <MatchScreen setActive={setActive}/>
+                : active==="Matchday"
+                  ? <MatchdayScreen setActive={setActive}/>
                 : <TacticsScreen setActive={setActive}/>}
-    </main>
+    </MainArea>
     <PlayerProfileModal goTo={setActive}/>
+    <SimulationWindow goTo={setActive}/>
     <GlobalSearch open={searchOpen} onClose={()=>setSearchOpen(false)} navigateTo={navigateTo}/>
   </div></SimulationProvider></TransfersProvider></TacticsProvider></TrainingProvider></ClubProvider></WorldProvider></CommunicationProvider></CompetitionProvider></StaffProvider>
 }

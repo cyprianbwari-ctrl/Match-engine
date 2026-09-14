@@ -31,6 +31,12 @@ export function SimulationProvider({ children, onGoToMatch }) {
   const [liveMatch, setLiveMatch] = useState(null); // { inProgress, minute, second, homeScore, awayScore, opponent }
   const [lastSavedAt, setLastSavedAt] = useState(() => formatTime(new Date(2025, 8, 13, 15, 42)));
   const [processLog, setProcessLog] = useState([]);
+  const [simWindowOpen, setSimWindowOpen] = useState(false);
+  const openSimWindow = useCallback(() => setSimWindowOpen(true), []);
+  const closeSimWindow = useCallback(() => setSimWindowOpen(false), []);
+  const [matchLocked, setMatchLocked] = useState(false);
+  const lockForMatch = useCallback(() => setMatchLocked(true), []);
+  const unlockAfterMatch = useCallback(() => setMatchLocked(false), []);
 
   const advanceClockOneDay = useCallback(() => {
     setNow(d => { const nd = new Date(d); nd.setDate(nd.getDate() + 1); nd.setHours(9, 0); return nd; });
@@ -93,6 +99,9 @@ export function SimulationProvider({ children, onGoToMatch }) {
     now, dateLabel: formatDate(now), timeLabel: formatTime(now), lastSavedAt,
     phase, daysUntilMatch, liveMatch, reportLiveMatch, gameStatus, nextLabel,
     continueGame, processLog,
+    simWindowOpen, openSimWindow, closeSimWindow,
+    matchLocked, lockForMatch, unlockAfterMatch,
+    advanceClockOneDay, setDaysUntilMatch, setPhase, setLastSavedAt,
   };
 
   return <SimCtx.Provider value={value}>{children}</SimCtx.Provider>;

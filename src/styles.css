@@ -25,3 +25,6 @@
 .sidebar.collapsed button{justify-content:center;padding:0}
 .sidebar.collapsed .slogan{display:none}
 .sidebar.collapsed+main{margin-left:72px}
+.main-disabled{filter:grayscale(0.6) brightness(0.35);pointer-events:none;user-select:none;transition:filter .25s}
+.brand{border:0;background:none;padding:0;text-align:left;cursor:pointer}
+.sidebar-locked{opacity:.4;filter:grayscale(.5)}

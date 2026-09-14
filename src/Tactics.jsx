@@ -36,7 +36,7 @@ const firstTeamPool = roster.filter(p => p.playTime !== "Youth");
 function labelFromValue(v) { return v <= 33 ? 0 : v <= 66 ? 1 : 2; }
 function valueFromLabelIndex(i) { return [20, 50, 85][i]; }
 
-export default function TacticsScreen({ setActive }) {
+export default function TacticsScreen({ setActive, initialTab, embedded }) {
   const {
     formation, setFormation, assignment, setAssignment, roleAssignment, setRoleAssignment,
     dutyAssignment, setDutyAssignment, playerInstructions, setPlayerInstructions,
@@ -45,7 +45,7 @@ export default function TacticsScreen({ setActive }) {
     autoLog, setAutoLog, presets, setPresets, situationPreset, setSituationPreset,
     setPieces, setSetPieces, startXI, slots,
   } = useTacticsData();
-  const [tab, setTab] = useState("Formation");
+  const [tab, setTab] = useState(initialTab || "Formation");
   const [tacticName, setTacticName] = useState("Main System");
   const [formationNotice, setFormationNotice] = useState(null);
   const [overrides, setOverrides] = useState({});
@@ -175,8 +175,8 @@ export default function TacticsScreen({ setActive }) {
   const benchPlayers = firstTeamPool.filter(p => !Object.values(assignment).includes(p.id));
 
   return <div className="tac-page">
-    <div className="tac-head"><span className="tac-head-icon"><Crosshair size={22} color="#06210a" /></span><h1>TACTICS</h1></div>
-    <div className="tac-tabs">{TABS.map(([t, Icon]) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}><Icon size={14} />{t}</button>)}</div>
+    {!embedded && <div className="tac-head"><span className="tac-head-icon"><Crosshair size={22} color="#06210a" /></span><h1>TACTICS</h1></div>}
+    {!embedded && <div className="tac-tabs">{TABS.map(([t, Icon]) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}><Icon size={14} />{t}</button>)}</div>}
 
     {formationNotice && <div className="formation-notice">
       <TriangleAlert size={15} /><span>{formationNotice}</span>

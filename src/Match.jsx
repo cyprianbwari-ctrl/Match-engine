@@ -10,6 +10,7 @@ import { useCompetitionData } from './store/CompetitionContext.jsx';
 import { useSimulation } from './store/SimulationContext.jsx';
 import { useWorldData } from './store/WorldContext.jsx';
 import { mapRosterPlayer } from './data/homeData.js';
+import TacticsScreen from './Tactics.jsx';
 import {
   buildXI, buildOpponentPool, initMatch, stepMatch, resolveDecision, simulateInstant, substitutePlayer,
 } from './engine/matchSimulator.js';
@@ -120,7 +121,7 @@ function PitchMarker({ p, isBall, onClick, selected }) {
 export default function MatchScreen({ setActive }) {
   const { slots, assignment, startXI, teamInstructions, pressing, tacticalDelegation, formation, dutyAssignment } = useTacticsData();
   const { league, recordUserMatchResult } = useCompetitionData();
-  const { reportLiveMatch } = useSimulation();
+  const { reportLiveMatch, unlockAfterMatch } = useSimulation();
   const { openProfileFor } = useWorldData();
 
   const [match, setMatch] = useState(() => buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName: 'Man Utd', league, dutyAssignment }));
@@ -136,7 +137,12 @@ export default function MatchScreen({ setActive }) {
   const [subsMade, setSubsMade] = useState(0);
   const [teamTalkOpen, setTeamTalkOpen] = useState(false);
   const [teamTalkNote, setTeamTalkNote] = useState('');
+  const [halfTimeOpen, setHalfTimeOpen] = useState(false);
+  const [tacticsOverlayOpen, setTacticsOverlayOpen] = useState(false);
+  const halfTimeShown = useRef(false);
   const resultRecorded = useRef(false);
+  const MAX_SUBS = 5;
+  const MAX_BENCH_CHOICES = 10;
 
   // Simulation loop. See BASE_TICKS_BY_SPEED comment for the timing model.
   useEffect(() => {
@@ -174,13 +180,30 @@ export default function MatchScreen({ setActive }) {
 
   const restart = () => {
     resultRecorded.current = false;
+    halfTimeShown.current = false;
     setMatch(buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName: 'Man Utd', league, dutyAssignment }));
-    setSelectedId(null); setSubsMade(0);
+    setSelectedId(null); setSubsMade(0); setHalfTimeOpen(false);
   };
-  const bench = useMemo(() => roster.filter(p => !match.homeXI.some(h => h.id === p.id)), [match.homeXI]);
+  const bench = useMemo(() =>
+    roster.filter(p => !match.homeXI.some(h => h.id === p.id))
+      .sort((a, b) => b.fit - a.fit)
+      .slice(0, MAX_BENCH_CHOICES),
+  [match.homeXI]);
+
+  // Half-time is a hard stop, not just a label change: the moment the clock
+  // crosses 45', the engine pauses itself and hands control to the manager
+  // (team talk / tactics / substitutions) rather than quietly ticking on
+  // into the second half.
+  useEffect(() => {
+    if (match.minute >= 45 && !halfTimeShown.current && !match.finished) {
+      halfTimeShown.current = true;
+      setRunning(false);
+      setHalfTimeOpen(true);
+    }
+  }, [match.minute, match.finished]);
 
   const makeSub = (inPlayer) => {
-    if (!subOut) return;
+    if (!subOut || subsMade >= MAX_SUBS) return;
     setMatch(m => {
       const outPlayer = m.homeXI.find(p => p.id === subOut);
       const newXI = substitutePlayer(m.homeXI, subOut, inPlayer);
@@ -270,7 +293,7 @@ export default function MatchScreen({ setActive }) {
       <button className="mtb-icon" onClick={() => window.confirm('Restart the match from kick-off?') && restart()} title="Restart match"><SkipBack size={16} /></button>
       <button className="mtb-icon play" onClick={() => setRunning(r => !r)} disabled={match.finished}>{running ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}</button>
       <button className="mtb-icon" onClick={jumpToNextHighlight} title="Jump to next highlight"><SkipForward size={16} /></button>
-      <button className="mtb-icon" onClick={() => setActive('Tactics')} title="Match settings"><Settings size={16} /></button>
+      <button className="mtb-icon" onClick={() => setTacticsOverlayOpen(true)} title="Match settings"><Settings size={16} /></button>
     </div>
 
     {match.pendingDecision && <div className="md-decision">
@@ -281,15 +304,77 @@ export default function MatchScreen({ setActive }) {
         : <div className="md-decision-options">{match.pendingDecision.options.map(o => <button key={o.key} onClick={() => choose(o.key)}><b>{o.key}</b> {o.label}</button>)}</div>}
     </div>}
 
+    {halfTimeOpen && <div className="ht-backdrop">
+      <div className="ht-panel">
+        <div className="ht-head">
+          <span className="ht-badge">HALF-TIME</span>
+          <h2>{match.homeName} {match.score.home} - {match.score.away} {match.awayName}</h2>
+        </div>
+        <div className="ht-stats">
+          <StatRow label="Possession" home={possessionHome} away={100 - possessionHome} format={v => `${v}%`} />
+          <StatRow label="Shots" home={homeStats.shots} away={awayStats.shots} />
+          <StatRow label="Shots on Target" home={homeStats.onTarget} away={awayStats.onTarget} />
+          <StatRow label="xG" home={(homeStats.xG || 0).toFixed(2)} away={(awayStats.xG || 0).toFixed(2)} />
+          <StatRow label="Pass Completion" home={passCompHome} away={passCompAway} format={v => `${v}%`} />
+        </div>
+        <div className="ht-actions">
+          <button onClick={() => setTeamTalkOpen(true)}><MessageSquare size={15} /><div><b>Team Talk</b><small>Address the dressing room</small></div></button>
+          <button onClick={() => setTacticsOverlayOpen(true)}><Crosshair size={15} /><div><b>Tactics</b><small>Adjust formation or instructions</small></div></button>
+          <button onClick={() => setSubsOpen(true)} disabled={subsMade >= MAX_SUBS}><Repeat size={15} /><div><b>Substitutions</b><small>{MAX_SUBS - subsMade} of {MAX_SUBS} remaining</small></div></button>
+        </div>
+        <button className="ht-continue" onClick={() => { setHalfTimeOpen(false); setRunning(true); }}><Play size={15} fill="currentColor" /> Continue to Second Half</button>
+      </div>
+    </div>}
+
+    {tacticsOverlayOpen && <div className="ht-backdrop">
+      <div className="ht-panel tactics-embed-panel">
+        <div className="ht-embed-head"><b>Tactics — In Match</b><button className="md-close" onClick={() => setTacticsOverlayOpen(false)}><X size={15} /></button></div>
+        <div className="ht-embed-body"><TacticsScreen setActive={() => {}} initialTab="Formation" embedded /></div>
+      </div>
+    </div>}
+
+    {match.finished && <div className="ht-backdrop">
+      <div className="ht-panel pm-panel">
+        <div className="ht-head">
+          <span className="ht-badge">FULL-TIME</span>
+          <h2>{match.homeName} {match.score.home} - {match.score.away} {match.awayName}</h2>
+        </div>
+        <div className="ht-stats">
+          <StatRow label="Possession" home={possessionHome} away={100 - possessionHome} format={v => `${v}%`} />
+          <StatRow label="Shots" home={homeStats.shots} away={awayStats.shots} />
+          <StatRow label="Shots on Target" home={homeStats.onTarget} away={awayStats.onTarget} />
+          <StatRow label="xG" home={(homeStats.xG || 0).toFixed(2)} away={(awayStats.xG || 0).toFixed(2)} />
+          <StatRow label="Corners" home={homeStats.corners} away={awayStats.corners} />
+          <StatRow label="Fouls" home={homeStats.fouls} away={awayStats.fouls} />
+          <StatRow label="Pass Completion" home={passCompHome} away={passCompAway} format={v => `${v}%`} />
+        </div>
+        <div className="pm-section">
+          <h4>Match Events</h4>
+          <div className="pm-event-list">
+            {match.events.filter(e => ['goal', 'sub', 'foul'].includes(e.type)).slice().reverse().map((e, i) => <div className="pm-event-row" key={i}><b>{e.minute}'</b><span>{e.text}</span></div>)}
+            {match.events.filter(e => ['goal', 'sub', 'foul'].includes(e.type)).length === 0 && <p className="muted-sub">A quiet match — no major events recorded.</p>}
+          </div>
+        </div>
+        <div className="pm-section">
+          <h4>Top Performers</h4>
+          <div className="pm-ratings">
+            {[...match.homeXI].sort((a, b) => matchRating(b) - matchRating(a)).slice(0, 4).map(p => <div className="pm-rating-row" key={p.id}><span>{p.name}</span><em className={matchRating(p) < 6.8 ? 'low' : ''}>{matchRating(p)}</em></div>)}
+          </div>
+        </div>
+        <button className="ht-continue" style={{ marginTop: 16 }} onClick={() => { unlockAfterMatch(); setActive('Home'); }}><Check size={15} /> Continue</button>
+      </div>
+    </div>}
+
     {subsOpen && <div className="md-subs-panel">
-      <div className="md-subs-head"><b>Make a Substitution</b><span className="muted-sub">Pick who comes off, then who comes on. The match continues.</span><button className="md-close" onClick={() => { setSubsOpen(false); setSubOut(null); }}><X size={15} /></button></div>
+      <div className="md-subs-head"><b>Make a Substitution</b><span className="muted-sub">Pick who comes off, then who comes on. {MAX_SUBS - subsMade} of {MAX_SUBS} substitutions remaining.</span><button className="md-close" onClick={() => { setSubsOpen(false); setSubOut(null); }}><X size={15} /></button></div>
+      {subsMade >= MAX_SUBS && <p className="muted-sub" style={{ padding: '0 4px 10px', color: '#ff8080' }}>You've used all {MAX_SUBS} substitutions for this match.</p>}
       <div className="md-subs-body">
         <div className="md-subs-col"><div className="panel-label">On the Pitch</div>
-          {match.homeXI.map(p => <button key={p.id} className={`md-sub-row ${subOut === p.id ? 'active' : ''}`} onClick={() => setSubOut(p.id)}><b>{p.name}</b><span>{p.role}</span></button>)}
+          {match.homeXI.map(p => <button key={p.id} className={`md-sub-row ${subOut === p.id ? 'active' : ''}`} disabled={subsMade >= MAX_SUBS} onClick={() => setSubOut(p.id)}><b>{p.name}</b><span>{p.role}</span></button>)}
         </div>
-        <div className="md-subs-col"><div className="panel-label">Bench</div>
-          {!subOut && <p className="muted-sub">Pick an outgoing player first.</p>}
-          {subOut && bench.map(p => <button key={p.id} className="md-sub-row" onClick={() => makeSub(p)}><b>{p.name}</b><span>{p.displayPos} · OVR {p.ovr} · Fit {p.fit}%</span></button>)}
+        <div className="md-subs-col"><div className="panel-label">Bench <small className="muted-sub">(up to {MAX_BENCH_CHOICES} available)</small></div>
+          {!subOut && subsMade < MAX_SUBS && <p className="muted-sub">Pick an outgoing player first.</p>}
+          {subOut && subsMade < MAX_SUBS && bench.map(p => <button key={p.id} className="md-sub-row" onClick={() => makeSub(p)}><b>{p.name}</b><span>{p.displayPos} · OVR {p.ovr} · Fit {p.fit}%</span></button>)}
         </div>
       </div>
     </div>}
@@ -332,8 +417,8 @@ export default function MatchScreen({ setActive }) {
         <section className="panel">
           <h3><Crosshair size={15} /> Formations</h3>
           <div className="mf-row">
-            <button className="mf-card" onClick={() => setActive('Tactics')}><MiniFormation formationName={formation} side="home" /><small>{formation}</small></button>
-            <button className="mf-card" onClick={() => setActive('Tactics')}><MiniFormation formationName={match.oppFormationName} side="away" /><small>{match.oppFormationName}</small></button>
+            <button className="mf-card" onClick={() => setTacticsOverlayOpen(true)}><MiniFormation formationName={formation} side="home" /><small>{formation}</small></button>
+            <button className="mf-card" onClick={() => setTacticsOverlayOpen(true)}><MiniFormation formationName={match.oppFormationName} side="away" /><small>{match.oppFormationName}</small></button>
           </div>
         </section>
       </aside>
@@ -380,7 +465,7 @@ export default function MatchScreen({ setActive }) {
 
           <div className="panel controls-panel">
             <h3>Match Controls</h3>
-            <button onClick={() => setActive('Tactics')}><Crosshair size={14} /> Tactics</button>
+            <button onClick={() => setTacticsOverlayOpen(true)}><Crosshair size={14} /> Tactics</button>
             <button onClick={() => setSubsOpen(s => !s)}><Repeat size={14} /> Substitutions {subsMade > 0 && <em>{subsMade}</em>}</button>
             <button onClick={() => setTeamTalkOpen(o => !o)}><MessageSquare size={14} /> Team Talk</button>
             <button onClick={runQuickSim}><FastForward size={14} /> Quick Sim</button>

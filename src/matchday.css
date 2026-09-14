@@ -1,0 +1,47 @@
+.mday-page{display:flex;flex-direction:column;gap:14px}
+.mday-banner{background:linear-gradient(180deg,#0a0f2866,#0a0f28cc),radial-gradient(circle at 50% 0%,#1c2a5a,#070a1c 70%);border:1px solid #2a3567;border-radius:12px;padding:20px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.mday-banner-top{display:flex;align-items:center;gap:10px}
+.mday-tag{color:#68ff2e;font-weight:900;font-size:15px;letter-spacing:1px}
+.mday-comp{color:#c4cbe6;font-size:12px}
+.mday-versus{display:flex;align-items:center;justify-content:center;gap:40px;margin:10px 0}
+.mday-team{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:170px}
+.mday-team b{font-size:15px;text-align:center}
+.mday-team span{color:#8f9abb;font-size:11px}
+.mday-vs{display:flex;flex-direction:column;align-items:center;gap:4px}
+.mday-vs b{font-size:20px;color:#8f9abb}
+.mday-vs small{color:#8f9abb;font-size:10.5px}
+.mday-sub{color:#8f9abb;font-size:11px}
+.crest-sq{width:56px;height:56px;border-radius:12px;background:radial-gradient(circle,#d82628 0 30%,#f4c938 31% 42%,#b20f1c 43%);border:2px solid #ffd95b;display:grid;place-items:center;font-size:12px;font-weight:900;flex:none}
+.crest-sq.brighton{background:radial-gradient(circle,#1e6fd9 0 55%,#0a4aa3 56%);border-color:#7fb2f0}
+
+.mday-tabs{display:flex;gap:6px;border:1px solid #263061;border-radius:9px;padding:5px;background:#080d20;overflow:auto}
+.mday-tabs button{border:0;background:transparent;color:#c4cbe6;padding:10px 15px;white-space:nowrap;font-size:11px;font-weight:700;border-radius:7px;cursor:pointer}
+.mday-tabs button.active{background:#68ff2e;color:#06210a}
+
+.mday-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:start}
+.mday-panel{background:linear-gradient(145deg,#0d122c,#080b1c);border:1px solid #2a3567;border-radius:10px;padding:14px}
+.mday-panel h3{margin:0 0 10px;font-size:13px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.4px}
+.mday-mini-row{display:flex;align-items:center;gap:8px;justify-content:space-between;font-size:11.5px;padding:6px 0;border-bottom:1px solid #1c2547}
+.mday-mini-row:last-child{border-bottom:0}
+.mday-mini-row span:first-child{color:#8f9abb}
+.mday-mini-list{display:flex;flex-direction:column}
+.mday-label{font-size:10px;color:#68ff2e;font-weight:800;text-transform:uppercase;margin:0 0 6px}
+.mday-bullet{font-size:11.5px;color:#dbe1f7;margin:4px 0;padding-left:12px;position:relative}
+.mday-bullet:before{content:"•";position:absolute;left:0;color:#8a5ff5}
+.mday-meeting-row{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;font-size:10.5px;padding:5px 0;border-bottom:1px solid #1c2547}
+.mday-meeting-row:last-child{border-bottom:0}
+.mday-meeting-row b{text-align:center;background:#0a0f28;border-radius:5px;padding:1px 8px}
+.mday-meeting-row span:last-child{text-align:right}
+.mday-link-btn{display:flex;align-items:center;gap:5px;background:none;border:0;color:#4fa8f5;font-size:10.5px;font-weight:700;cursor:pointer;margin-top:10px;padding:0}
+
+.mday-preview p{font-size:12px;color:#dbe1f7;line-height:1.5;margin:0 0 14px}
+.mday-start-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:48px;border-radius:9px;background:#68ff2e;border:0;color:#06210a;font-weight:900;font-size:13px;cursor:pointer}
+.mday-start-btn small{font-weight:700;opacity:.75}
+
+.mday-embed{background:transparent}
+
+.mday-footer{display:flex;gap:10px;align-items:center;background:linear-gradient(145deg,#0d122c,#080b1c);border:1px solid #2a3567;border-radius:10px;padding:12px 16px}
+.mday-foot-btn{display:flex;align-items:center;gap:7px;background:#10163a;border:1px solid #303d70;color:#dbe1f7;border-radius:8px;padding:9px 14px;font-size:11.5px;font-weight:700;cursor:pointer}
+.mday-confirm-btn{margin-left:auto;display:flex;align-items:center;gap:7px;background:#5b2fc9;border:1px solid #8a5ff5;color:#fff;border-radius:8px;padding:10px 18px;font-size:11.5px;font-weight:800;cursor:pointer}
+
+@media(max-width:1100px){.mday-grid{grid-template-columns:1fr}.mday-versus{gap:20px}}
