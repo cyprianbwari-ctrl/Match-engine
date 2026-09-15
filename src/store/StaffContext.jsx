@@ -110,7 +110,13 @@ export function StaffProvider({ children }) {
   const value = useMemo(() => ({
     staffList, candidates, scoutAssignments, inbox, delegation, vacancies,
     advanceCandidate, rejectCandidate, hireCandidate, assignStaff,
-    addScoutAssignment, updateScoutAssignmentStatus, resolveInbox, toggleDelegation
+    addScoutAssignment, updateScoutAssignmentStatus, resolveInbox, toggleDelegation,
+    getSnapshot: () => ({ staffList, delegation }),
+    restoreSnapshot: (s) => {
+      if (!s) return;
+      if (s.staffList) setStaffList(s.staffList);
+      if (s.delegation) setDelegation(s.delegation);
+    },
   }), [staffList, candidates, scoutAssignments, inbox, delegation, vacancies, advanceCandidate, rejectCandidate, hireCandidate, assignStaff, addScoutAssignment, updateScoutAssignmentStatus, resolveInbox, toggleDelegation]);
 
   return <StaffCtx.Provider value={value}>{children}</StaffCtx.Provider>;

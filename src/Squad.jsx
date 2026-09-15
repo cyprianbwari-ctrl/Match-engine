@@ -14,6 +14,7 @@ import { useClubData } from './store/ClubContext.jsx';
 import { useCompetitionData } from './store/CompetitionContext.jsx';
 import { useTacticsData } from './store/TacticsContext.jsx';
 import { useTransfersData } from './store/TransfersContext.jsx';
+import { usePlayerState } from './store/PlayerStateContext.jsx';
 import { mapRosterPlayer } from './data/homeData.js';
 import { clubIdentity, stadium, clubReputation, squadStaffSummary } from './data/clubData.js';
 
@@ -53,7 +54,7 @@ const BUCKET_LABEL = { GK: 'Goalkeeper', DEF: 'Defender', MID: 'Midfielder', ATT
 // (kept in the same style as data/homeData.js's mapRosterPlayer, so numbers
 // stay consistent with what the rest of the app already derives from a player)
 function potentialOf(p) { return Math.min(96, p.ovr + 4); }
-function sharpnessOf(p) { return Math.max(50, Math.min(99, Math.round(p.fit - 3 + (p.id % 7)))); }
+function sharpnessOf(p) { return p.sharpness != null ? Math.round(p.sharpness) : Math.max(50, Math.min(99, Math.round(p.fit - 3 + (p.id % 7)))); }
 function appsOf(p) { return 14 + (p.id % 4); }
 function wageShort(p) { return String(p.wage || '').replace('/w', ''); }
 function moneyShort(v) { const n = Number(String(v).replace(/[^0-9]/g, '')); return n >= 1000000 ? `£${Math.round(n / 1000000)}M` : `£${Math.round(n / 1000)}k`; }
@@ -105,6 +106,7 @@ function OverviewOv({ players, setPlayers, onOpen, goTo }) {
   const { formation, startingIds } = useTacticsData();
   const { league } = useCompetitionData();
   const { transferListedRosterIds, loansOut } = useTransfersData();
+  const { mergePlayer } = usePlayerState();
   const [ovFilter, setOvFilter] = useState('All');
   const [sortKey, setSortKey] = useState('ovr');
   const [activeRow, setActiveRow] = useState(null);
@@ -223,7 +225,8 @@ function OverviewOv({ players, setPlayers, onOpen, goTo }) {
         </div>
         <div className="ov-table">
           <div className="ov-row ov-head"><span>#</span><span>Pos</span><span>Player</span><span>Nat</span><span>Age</span><span>OVR</span><span>POT</span><span>Con</span><span>Sharp</span><span>Morale</span><span>Form</span><span>Apps</span><span>Wage</span><span>Value</span><span>Status</span></div>
-          {ovRows.map(p => {
+          {ovRows.map(rawP => {
+            const p = mergePlayer(rawP);
             const st = statusMeta(p, transferListedRosterIds.includes(p.id), loansOut.some(l => l.rosterId === p.id));
             return <button key={p.id} className={"ov-row ov-body" + (activeRow && activeRow.id === p.id ? ' sel' : '')} onClick={() => setActiveRow(p)}>
               <span>{p.number}</span>
@@ -427,6 +430,8 @@ export default function SquadScreen({ setActive }) {
   const { openProfileFor } = useWorldData();
   const { startingIds } = useTacticsData();
   const { signings } = useTransfersData();
+  const { mergePlayer } = usePlayerState();
+  const livePlayers = useMemo(() => players.map(mergePlayer), [players, mergePlayer]);
   const goTo = (screen) => setActive(screen);
   const onOpen = (p) => openProfileFor(mapRosterPlayer(p), 'Squad');
 
@@ -466,13 +471,13 @@ export default function SquadScreen({ setActive }) {
     {tab === 'overview' && <>
       <OverviewOv players={players} setPlayers={setPlayers} onOpen={onOpen} goTo={goTo} />
       <div className="sq-bottom-grid">
-        <SquadRolesCard players={players} />
-        <SquadManagementCard players={players} />
+        <SquadRolesCard players={livePlayers} />
+        <SquadManagementCard players={livePlayers} />
         <AssistantManagerCard goTo={goTo} />
       </div>
     </>}
-    {tab === 'firstTeam' && <FirstTeam players={players} onOpen={onOpen} goTo={goTo} startingIds={startingIds} />}
-    {tab === 'youth' && <Youth players={players} onOpen={onOpen} startingIds={startingIds} />}
-    {tab === 'search' && <PlayerSearchTab players={players} onOpen={onOpen} goTo={goTo} startingIds={startingIds} />}
+    {tab === 'firstTeam' && <FirstTeam players={livePlayers} onOpen={onOpen} goTo={goTo} startingIds={startingIds} />}
+    {tab === 'youth' && <Youth players={livePlayers} onOpen={onOpen} startingIds={startingIds} />}
+    {tab === 'search' && <PlayerSearchTab players={livePlayers} onOpen={onOpen} goTo={goTo} startingIds={startingIds} />}
   </div>;
 }

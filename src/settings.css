@@ -1,0 +1,60 @@
+.settings-page{display:flex;flex-direction:column;gap:14px}
+.settings-head{display:flex;align-items:center;gap:14px}
+.settings-head-icon{width:44px;height:44px;border-radius:12px;background:linear-gradient(150deg,#68ff2e,#1f7a1a);display:grid;place-items:center;flex-shrink:0}
+.settings-head h1{margin:0;font-size:24px}
+.settings-head span{color:#8f9abb;font-size:12px}
+
+.settings-panel{background:linear-gradient(145deg,#0d122c,#080b1c);border:1px solid #2a3567;border-radius:10px;padding:16px}
+.settings-panel h3{margin:0 0 12px;font-size:14px;display:flex;align-items:center;gap:8px}
+.settings-panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.settings-panel-head h3{margin:0}
+.settings-refresh{display:flex;align-items:center;gap:6px;background:#10163a;border:1px solid #303d70;color:#c4cbe6;border-radius:7px;padding:7px 12px;font-size:10.5px;font-weight:700;cursor:pointer}
+
+.autosave-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px}
+.autosave-status{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#68ff2e}
+.autosave-dot{width:8px;height:8px;border-radius:50%;background:#68ff2e;box-shadow:0 0 8px #68ff2e}
+.autosave-last{font-size:11px;color:#8f9abb}
+
+.save-flash{display:flex;align-items:center;gap:6px;background:#123a1e;border:1px solid #2fae5b;color:#68ff2e;border-radius:7px;padding:8px 12px;font-size:11.5px;font-weight:700;margin-bottom:12px}
+
+.save-slots-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.save-slot{background:#0a0f28;border:1px solid #2a3567;border-radius:9px;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:120px}
+.save-slot-head{display:flex;align-items:center;justify-content:space-between}
+.save-slot-head b{font-size:12.5px}
+.slot-delete{background:none;border:0;color:#ff8080;cursor:pointer;padding:2px}
+.slot-details{display:flex;flex-direction:column;gap:2px;flex:1}
+.slot-details span{font-size:12px;color:#dbe1f7}
+.slot-details span:first-child{font-weight:700}
+.slot-details small{color:#8f9abb;font-size:10px;margin-top:2px}
+.slot-actions{display:flex;gap:8px}
+.slot-save-btn,.slot-load-btn{flex:1;height:34px;border-radius:7px;font-size:10.5px;font-weight:700;cursor:pointer;border:1px solid #38436f}
+.slot-save-btn{background:#5b2fc9;border-color:#8a5ff5;color:#fff}
+.slot-load-btn{background:#10163a;color:#c4cbe6}
+.slot-confirm{display:flex;align-items:center;gap:8px;font-size:10.5px;color:#ff8080}
+.slot-confirm button{background:#10163a;border:1px solid #38436f;color:#dbe1f7;border-radius:6px;padding:5px 10px;font-size:10px;cursor:pointer}
+
+.career-info-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.career-info-grid div{background:#0a0f28;border:1px solid #2a3567;border-radius:8px;padding:10px}
+.career-info-grid span{display:block;font-size:9.5px;color:#8f9abb}
+.career-info-grid b{font-size:13px}
+
+.mgr-head{display:flex;align-items:center;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+.mgr-avatar{width:56px;height:56px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#8a6bffdd,#8a6bff88 60%,#05070f 130%);display:grid;place-items:center;font-weight:900;font-size:18px;color:#fff;flex-shrink:0}
+.mgr-id{flex:1;min-width:200px;display:flex;flex-direction:column;gap:2px}
+.mgr-id h4{margin:0;font-size:15px}
+.mgr-reputation{background:#0a0f28;border:1px solid #2a3567;border-radius:9px;padding:10px 16px;text-align:center;min-width:140px}
+.mgr-reputation b{font-size:22px;display:block}
+.mgr-reputation span{font-size:10px;color:#8f9abb;font-weight:700}
+.rep-bar{height:5px;border-radius:99px;background:#1a2245;overflow:hidden;margin-top:6px}
+.rep-bar i{display:block;height:100%;background:linear-gradient(90deg,#8a5ff5,#68ff2e)}
+.mgr-attrs{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px 16px;margin-bottom:14px}
+.mgr-attrs>div{display:flex;align-items:center;gap:8px;font-size:10.5px}
+.mgr-attrs span{width:110px;flex-shrink:0;color:#8f9abb}
+.mgr-attrs .attr-track{flex:1;height:6px;border-radius:99px;background:#1a2245;overflow:hidden}
+.mgr-attrs .attr-track i{display:block;height:100%;background:#68ff2e}
+.mgr-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.mgr-cols h4{display:flex;align-items:center;gap:6px;margin:0 0 8px;font-size:11.5px;color:#c4cbe6}
+.mgr-history-row{display:flex;flex-direction:column;gap:1px;padding:6px 0;border-bottom:1px solid #1c2547;font-size:11px}
+.mgr-history-row span{color:#8f9abb;font-size:9.5px}
+.mgr-history-row b{font-size:11.5px}
+.mgr-history-row small{color:#8f9abb}

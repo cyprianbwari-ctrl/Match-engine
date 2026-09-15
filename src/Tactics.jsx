@@ -16,6 +16,7 @@ import { autoAssign, familiarity, assistantInsights } from "./tactics/logic.js";
 import { useWorldData } from "./store/WorldContext.jsx";
 import { useTacticsData } from "./store/TacticsContext.jsx";
 import { mapRosterPlayer } from "./data/homeData.js";
+import { usePlayerState } from "./store/PlayerStateContext.jsx";
 import "./tactics.css";
 
 const SQUARE_TYPES = ["Defensive Square", "Midfield Square", "Custom"];
@@ -45,6 +46,7 @@ export default function TacticsScreen({ setActive, initialTab, embedded }) {
     autoLog, setAutoLog, presets, setPresets, situationPreset, setSituationPreset,
     setPieces, setSetPieces, startXI, slots,
   } = useTacticsData();
+  const { mergePlayer } = usePlayerState();
   const [tab, setTab] = useState(initialTab || "Formation");
   const [tacticName, setTacticName] = useState("Main System");
   const [formationNotice, setFormationNotice] = useState(null);
@@ -172,7 +174,7 @@ export default function TacticsScreen({ setActive, initialTab, embedded }) {
   const insights = useMemo(() => assistantInsights({ roster: startXI, assignment, pressing, teamInstructions, avgFit }), [assignment, pressing, teamInstructions, avgFit]);
 
   const captain = [...firstTeamPool].filter(p => p.bucket !== "GK").sort((a, b) => b.ovr - a.ovr).find(p => p.playTime === "Key Player") || firstTeamPool[0];
-  const benchPlayers = firstTeamPool.filter(p => !Object.values(assignment).includes(p.id));
+  const benchPlayers = firstTeamPool.filter(p => !Object.values(assignment).includes(p.id)).map(mergePlayer);
 
   return <div className="tac-page">
     {!embedded && <div className="tac-head"><span className="tac-head-icon"><Crosshair size={22} color="#06210a" /></span><h1>TACTICS</h1></div>}
@@ -385,13 +387,13 @@ function FormationTab({
               <span>{BUCKET_LABEL[g.bucket]} ({g.rows.length})</span>
               <ChevronDown size={14} style={{ transform: collapsed[g.bucket] ? "rotate(-90deg)" : "none" }} />
             </button>
-            {!collapsed[g.bucket] && g.rows.map(p => <div className="avail-row" key={p.id} draggable onDragStart={e => dragBenchStart(e, p.id)}>
+            {!collapsed[g.bucket] && g.rows.map(p => <div className={`avail-row${p.isAvailable === false ? ' unavailable' : ''}`} key={p.id} draggable={p.isAvailable !== false} onDragStart={e => p.isAvailable !== false && dragBenchStart(e, p.id)} title={p.injury ? `Injured — ${p.injury.type} (back ${p.injury.expectedReturn})` : p.suspension ? `Suspended — ${p.suspension.reason}` : ''}>
               <span className="tac-avatar small">{p.name.split(" ").map(w => w[0]).join("").slice(0, 2)}</span>
-              <span className="dotlg green tiny" />
+              <span className={`dotlg tiny ${p.isAvailable === false ? 'red' : 'green'}`} />
               <b className="avail-name">{p.name}</b>
               <span className="avail-pos">{p.displayPos}</span>
-              <em className="badge ovr">{p.ovr}</em>
-              <button className="avail-add" onClick={() => assignToBestSlot(p)}><Plus size={13} /></button>
+              {p.injury ? <em className="avail-flag injured">INJ</em> : p.suspension ? <em className="avail-flag suspended">SUS</em> : <em className="badge ovr">{p.ovr}</em>}
+              <button className="avail-add" disabled={p.isAvailable === false} onClick={() => p.isAvailable !== false && assignToBestSlot(p)}><Plus size={13} /></button>
             </div>)}
           </div>)}
           {grouped.length === 0 && <p className="muted-sub" style={{ padding: 10 }}>No players match this search.</p>}

@@ -6,6 +6,12 @@ import {
 } from 'lucide-react';
 import './match.css';
 import { useTacticsData } from './store/TacticsContext.jsx';
+import { useFinanceData } from './store/FinanceContext.jsx';
+import { usePlayerState } from './store/PlayerStateContext.jsx';
+import { useCommunicationData } from './store/CommunicationContext.jsx';
+import { useManagerData } from './store/ManagerContext.jsx';
+import { useClubState } from './store/ClubStateContext.jsx';
+import { homeMatchdayRevenue, homeAdvantageFactor, fixtureDetail } from './data/fixtureDetail.js';
 import { useCompetitionData } from './store/CompetitionContext.jsx';
 import { useSimulation } from './store/SimulationContext.jsx';
 import { useWorldData } from './store/WorldContext.jsx';
@@ -81,9 +87,15 @@ function buildMatchState({ slots, assignment, startXI, teamInstructions, pressin
   const awayPairs = oppSlots.map((slot, i) => ({ slot, duty: DEFAULT_DUTY[slot.code] || 'Support', player: namedPool[i] }));
   const awayXI = buildXI(awayPairs, 'away');
 
+  // A near-full Old Trafford is real home advantage, not flavour text — it
+  // nudges tempo up slightly, the same way a loud, expectant crowd actually
+  // affects how a team plays.
+  const isHomeFixture = !fixture || fixture.home === 'Man Utd';
+  const advantage = isHomeFixture ? homeAdvantageFactor(fixtureDetail(fixture, true).attendance, fixtureDetail(fixture, true).capacity) : 1;
+
   const state = initMatch({
     homeXI, awayXI, homeName, awayName: oppRow.club,
-    homeTactics: { mentality: teamInstructions.mentality, tempo: teamInstructions.tempo, defensiveLine: teamInstructions.defensiveLine, pressing },
+    homeTactics: { mentality: teamInstructions.mentality, tempo: Math.min(90, Math.round(teamInstructions.tempo * advantage)), defensiveLine: teamInstructions.defensiveLine, pressing },
     awayTactics: { mentality: oppRow.pts >= 30 ? 'Positive' : 'Balanced', tempo: oppRow.pts >= 30 ? 62 : 56, defensiveLine: 55, pressing: { intensity: oppRow.pts >= 30 ? 66 : 58 } },
   });
   state.oppFormationName = oppFormationName;
@@ -123,6 +135,11 @@ export default function MatchScreen({ setActive }) {
   const { league, recordUserMatchResult } = useCompetitionData();
   const { reportLiveMatch, unlockAfterMatch } = useSimulation();
   const { openProfileFor } = useWorldData();
+  const finance = useFinanceData();
+  const playerState = usePlayerState();
+  const { addNews } = useCommunicationData();
+  const manager = useManagerData();
+  const clubState = useClubState();
 
   const [match, setMatch] = useState(() => buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName: 'Man Utd', league, dutyAssignment }));
   const [running, setRunning] = useState(false);
@@ -248,7 +265,72 @@ export default function MatchScreen({ setActive }) {
 
   useEffect(() => {
     reportLiveMatch({ inProgress: running && !match.finished, minute: match.minute, second: match.second, homeScore: match.score.home, awayScore: match.score.away, opponent: match.awayName, finished: match.finished });
-    if (match.finished && !resultRecorded.current) { resultRecorded.current = true; recordUserMatchResult(match.score.home, match.score.away); }
+    if (match.finished && !resultRecorded.current) {
+      resultRecorded.current = true;
+      recordUserMatchResult(match.score.home, match.score.away);
+      // A manager's reputation is a real, moving number now — built from
+      // actual results, not just a static profile field.
+      {
+        const weWon = match.homeName === 'Man Utd' ? match.score.home > match.score.away : match.score.away > match.score.home;
+        const weDrew = match.score.home === match.score.away;
+        const oppName = match.homeName === 'Man Utd' ? match.awayName : match.homeName;
+        if (weWon) manager.adjustReputation(1.5 + Math.random() * 1.5, `Win against ${oppName}`);
+        else if (weDrew) manager.adjustReputation(-0.2, `Draw with ${oppName}`);
+        else manager.adjustReputation(-(1.5 + Math.random() * 1.5), `Defeat to ${oppName}`);
+        // The board reacts to results too — a touch more conservatively
+        // than your own reputation, since one bad result rarely shakes
+        // board confidence as much as a genuine run of form would.
+        if (weWon) clubState.adjustBoardConfidence(1 + Math.random(), `Win against ${oppName}`);
+        else if (!weDrew) clubState.adjustBoardConfidence(-(1 + Math.random() * 1.5), `Defeat to ${oppName}`);
+      }
+      // Every completed home fixture should actually generate matchday
+      // income — an away trip still earns a smaller broadcast/travelling
+      // support share, not a full house of ticket revenue.
+      const weAreHome = match.homeName === 'Man Utd';
+      const won = weAreHome ? match.score.home > match.score.away : match.score.away > match.score.home;
+      // Real attendance-based revenue for home games (same fixture detail
+      // shown pre-match in the Matchday hub, not a separate random number)
+      // — a genuinely full house at Old Trafford earns more than a
+      // half-empty one, and away trips only ever earn a broadcast/travel
+      // share, never ticket revenue.
+      const homeRevenue = weAreHome ? homeMatchdayRevenue(league.fixtures[0]) : null;
+      const base = weAreHome ? homeRevenue.amount : 350_000 + Math.round(Math.random() * 250_000);
+      const amount = won ? Math.round(base * 1.15) : base;
+      finance.addTransaction(
+        weAreHome ? `Matchday Revenue vs ${match.awayName} (${homeRevenue.attendance.toLocaleString()} attendance)` : `Away Day Share — ${match.homeName}`,
+        amount, 'Matchday Revenue',
+      );
+      // Write real match involvement back into each player's live state —
+      // this is what makes fitness/form/fatigue actually move instead of
+      // sitting at their seed values forever, and what can trigger a real
+      // injury record tied to the current in-game date.
+      const dateLabel = new Date().toDateString();
+      match.homeXI.forEach(p => {
+        if (typeof p.id !== 'number') return; // skip synthetic opponent players
+        const rating = Number(matchRating(p));
+        playerState.recordMatchPerformance(p.id, {
+          minutesPlayed: 90, rating, started: true,
+          goals: p.goals || 0, assists: p.assists || 0, shots: p.shots || 0, tackles: p.tackles || 0,
+          passesCompleted: p.passesCompleted || 0, passesAttempted: p.passesAttempted || 0,
+          yellowCards: p.yellowCards || 0, redCard: !!p.redCard,
+          cleanSheet: match.score.away === 0 && match.homeName === 'Man Utd',
+        });
+        // Small extra injury risk tied to how physical the match was for
+        // this player — separate from the independent daily knock risk.
+        const injuryChance = 0.02 + (p.tackles || 0) * 0.004;
+        if (Math.random() < injuryChance) {
+          const info = playerState.applyInjury(p.id, dateLabel);
+          addNews({ category: 'Injury', bucket: 'Club News', crest: 'Man Utd', headline: `${p.name} injured — ${info.type}`, body: `Expected to be out until ${info.expectedReturn}.` });
+        }
+        // A red card is a genuine event that should reach News too, not
+        // just sit in the match report — one event, multiple consequences.
+        if (p.redCard) {
+          const opponentName = weAreHome ? match.awayName : match.homeName;
+          addNews({ category: 'Discipline', bucket: 'Club News', crest: 'Man Utd', headline: `${p.name} sent off vs ${opponentName}`, body: `${p.name} will serve a suspension for the next fixture.` });
+        }
+      });
+      playerState.tickSuspensions();
+    }
   }, [running, match.minute, match.second, match.finished, match.score.home, match.score.away]);
 
   useEffect(() => () => {
@@ -260,7 +342,7 @@ export default function MatchScreen({ setActive }) {
   const selected = allPlayers.find(p => p.id === selectedId) || null;
   const goals = match.events.filter(e => e.type === 'goal').slice().reverse();
   const visibleFeed = feedTab === 'Match Events'
-    ? match.events.filter(e => ['goal', 'sub', 'foul'].includes(e.type))
+    ? match.events.filter(e => ['goal', 'sub', 'foul', 'card'].includes(e.type))
     : highlightsOnly ? match.events.filter(e => e.type !== 'play') : match.events;
 
   const homeStats = match.stats.home, awayStats = match.stats.away;
@@ -351,8 +433,8 @@ export default function MatchScreen({ setActive }) {
         <div className="pm-section">
           <h4>Match Events</h4>
           <div className="pm-event-list">
-            {match.events.filter(e => ['goal', 'sub', 'foul'].includes(e.type)).slice().reverse().map((e, i) => <div className="pm-event-row" key={i}><b>{e.minute}'</b><span>{e.text}</span></div>)}
-            {match.events.filter(e => ['goal', 'sub', 'foul'].includes(e.type)).length === 0 && <p className="muted-sub">A quiet match — no major events recorded.</p>}
+            {match.events.filter(e => ['goal', 'sub', 'foul', 'card'].includes(e.type)).slice().reverse().map((e, i) => <div className="pm-event-row" key={i}><b>{e.minute}'</b><span>{e.text}</span></div>)}
+            {match.events.filter(e => ['goal', 'sub', 'foul', 'card'].includes(e.type)).length === 0 && <p className="muted-sub">A quiet match — no major events recorded.</p>}
           </div>
         </div>
         <div className="pm-section">

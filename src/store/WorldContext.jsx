@@ -107,6 +107,12 @@ export function WorldProvider({ children }) {
     shortlist, toggleShortlist, scouted, addScout, openProfileFor, closeProfile,
     filters, setFilters, searchResults,
     leagues, wonderkids, transferActivity, reputationMovers, availablePlayers,
+    getSnapshot: () => ({ shortlist, scouted }),
+    restoreSnapshot: (s) => {
+      if (!s) return;
+      if (s.shortlist) setShortlist(s.shortlist);
+      if (s.scouted) setScouted(s.scouted);
+    },
   };
 
   return <WorldCtx.Provider value={value}>{children}</WorldCtx.Provider>;

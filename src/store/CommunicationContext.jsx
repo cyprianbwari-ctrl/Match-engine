@@ -48,6 +48,12 @@ export function CommunicationProvider({ children }) {
     messages, markRead, markAllRead, removeMessage, addMessage, unreadCount,
     calendarDays, visibleDays, selectedDay, setSelectedDay, shiftDays,
     eventsForSelectedDay, newsItems, addNews,
+    getSnapshot: () => ({ messages, newsItems }),
+    restoreSnapshot: (s) => {
+      if (!s) return;
+      if (s.messages) setMessages(s.messages);
+      if (s.newsItems) setNewsItems(s.newsItems);
+    },
   };
 
   return <CommCtx.Provider value={value}>{children}</CommCtx.Provider>;

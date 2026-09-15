@@ -102,6 +102,14 @@ export function SimulationProvider({ children, onGoToMatch }) {
     simWindowOpen, openSimWindow, closeSimWindow,
     matchLocked, lockForMatch, unlockAfterMatch,
     advanceClockOneDay, setDaysUntilMatch, setPhase, setLastSavedAt,
+    getSnapshot: () => ({ now: now.toISOString(), daysUntilMatch, phase, lastSavedAt }),
+    restoreSnapshot: (s) => {
+      if (!s) return;
+      if (s.now) setNow(new Date(s.now));
+      if (s.daysUntilMatch !== undefined) setDaysUntilMatch(s.daysUntilMatch);
+      if (s.phase) setPhase(s.phase);
+      if (s.lastSavedAt) setLastSavedAt(s.lastSavedAt);
+    },
   };
 
   return <SimCtx.Provider value={value}>{children}</SimCtx.Provider>;

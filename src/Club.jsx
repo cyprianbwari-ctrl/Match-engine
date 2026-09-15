@@ -8,6 +8,10 @@ import {
 import './club.css';
 import { useClubData } from './store/ClubContext.jsx';
 import { useStaffData } from './store/StaffContext.jsx';
+import { useClubState } from './store/ClubStateContext.jsx';
+import { useManagerData } from './store/ManagerContext.jsx';
+import { usePlayerState } from './store/PlayerStateContext.jsx';
+import { useTransfersData } from './store/TransfersContext.jsx';
 import * as D from './data/clubData.js';
 
 // ---------- Shared bits ----------
@@ -45,6 +49,7 @@ function Toggle({ checked, onChange }) {
 
 function IdentityCard() {
   const id = D.clubIdentity;
+  const clubState = useClubState();
   return <section className="comm-card club-identity">
     <Badge />
     <div className="ci-main">
@@ -53,7 +58,8 @@ function IdentityCard() {
       <div className="ci-meta"><span>🏴 {id.country}</span><span>{id.league}</span></div>
     </div>
     <div className="ci-rep"><div><span>Reputation</span><b>Worldwide</b><Stars value={id.reputationWorldwide} /></div>
-      <div><span>Continental Reputation</span><b>Europe</b><Stars value={id.reputationContinental} /></div></div>
+      <div><span>Continental Reputation</span><b>Europe</b><Stars value={id.reputationContinental} /></div>
+      <div><span>Board Confidence</span><b style={{ color: clubState.boardConfidence >= 60 ? '#3ddc84' : clubState.boardConfidence >= 40 ? '#f2c94c' : '#ef4f4f' }}>{clubState.confidenceTier}</b><small className="muted-sub">{clubState.boardConfidence}% · Target: {clubState.seasonExpectation.label}</small></div></div>
     <div className="ci-kits">{id.kits.map(k => <div className="kit" key={k.label}><i style={{ background: k.color, border: k.border ? '1px solid #999' : 'none' }} /><span>{k.label}</span></div>)}</div>
   </section>;
 }
@@ -95,14 +101,32 @@ function InfoTiles({ goTo }) {
 
 function HonoursHistoryCard() {
   const [sub, setSub] = useState('Honours');
+  const clubState = useClubState();
+  const manager = useManagerData();
+  const playerState = usePlayerState();
+  const { history: transferHistory } = useTransfersData();
+  // A real, merged timeline of this actual playthrough — club confidence
+  // swings, manager reputation events, awards, and completed transfers —
+  // rather than only the pre-written all-time club history.
+  const thisSeasonHistory = [
+    ...clubState.clubHistory.map(h => ({ ...h, source: 'Club' })),
+    ...manager.careerHistory.map(h => ({ date: h.date, event: h.event, detail: h.club, source: 'Manager' })),
+    ...playerState.awardsHistory.map(h => ({ date: h.month, event: `${h.award}: ${h.winner}`, detail: `Rating ${h.rating}`, source: 'Award' })),
+    ...transferHistory.map(h => ({ date: h.date, event: `Signed ${h.name}`, detail: `${h.from} → ${h.to} · £${Math.round(h.fee).toLocaleString()}`, source: 'Transfer' })),
+  ].slice(-40).reverse();
+
   return <section className="comm-card">
-    <div className="sub-tabs">{['Honours', 'Records', 'History'].map(t => <button key={t} className={sub === t ? 'active' : ''} onClick={() => setSub(t)}>{t === 'Honours' ? 'Honours & Trophies' : t === 'Records' ? 'Club Records' : 'History'}</button>)}</div>
+    <div className="sub-tabs">{['Honours', 'Records', 'History', 'This Season'].map(t => <button key={t} className={sub === t ? 'active' : ''} onClick={() => setSub(t)}>{t === 'Honours' ? 'Honours & Trophies' : t === 'Records' ? 'Club Records' : t}</button>)}</div>
     {sub === 'Honours' && <>
       <div className="panel-label">Major Honours</div>
       <div className="honours-grid">{D.majorHonours.map(h => <div className="honour-card" key={h.name}><Trophy size={22} color="#ffd76b" /><b>{h.count}</b><span>{h.name}</span><small>(Last: {h.last})</small></div>)}</div>
     </>}
     {sub === 'Records' && D.clubRecords.map(r => <div className="objective-row" key={r.label}><Star size={14} color="#ffd76b" /><div><b>{r.label}</b><span>{r.value}</span></div></div>)}
     {sub === 'History' && D.clubHistory.map(h => <div className="achievement-row" key={h.year}><b>{h.year}</b><span>{h.text}</span></div>)}
+    {sub === 'This Season' && <>
+      {thisSeasonHistory.length === 0 && <p className="muted-sub">Nothing significant recorded yet this season.</p>}
+      {thisSeasonHistory.map((h, i) => <div className="achievement-row" key={i}><b>{h.date}</b><span>{h.event}</span><small className="muted-sub" style={{ marginLeft: 8 }}>{h.detail}</small></div>)}
+    </>}
   </section>;
 }
 

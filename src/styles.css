@@ -28,3 +28,12 @@
 .main-disabled{filter:grayscale(0.6) brightness(0.35);pointer-events:none;user-select:none;transition:filter .25s}
 .brand{border:0;background:none;padding:0;text-align:left;cursor:pointer}
 .sidebar-locked{opacity:.4;filter:grayscale(.5)}
+.recovery-backdrop{position:fixed;inset:0;background:#000c;z-index:100;display:grid;place-items:center;padding:20px}
+.recovery-panel{width:min(420px,100%);background:linear-gradient(160deg,#0e1230,#070a1c);border:1px solid #2a3567;border-radius:14px;padding:28px;text-align:center}
+.recovery-panel h2{margin:0 0 8px;font-size:18px;color:#68ff2e;letter-spacing:.5px}
+.recovery-panel p{margin:0 0 14px;color:#c4cbe6;font-size:12.5px}
+.recovery-date{background:#0a0f28;border:1px solid #2a3567;border-radius:8px;padding:10px;font-size:13px;font-weight:700;margin-bottom:18px}
+.recovery-actions{display:flex;gap:10px}
+.recovery-actions button{flex:1;height:44px;border-radius:9px;font-weight:800;font-size:12.5px;cursor:pointer;border:1px solid #38436f}
+.recovery-discard{background:#10163a;color:#c4cbe6}
+.recovery-recover{background:#68ff2e;border-color:#68ff2e;color:#06210a}

@@ -68,6 +68,26 @@ export function TacticsProvider({ children }) {
     autoLog, setAutoLog, presets, setPresets, situationPreset, setSituationPreset,
     setPieces, setSetPieces, oppositionInstructions, setOppositionInstructions,
     startXI, slots, startingIds,
+    getSnapshot: () => ({
+      formation, assignment, roleAssignment, dutyAssignment, playerInstructions,
+      teamInstructions, pressing, tacticalDelegation, presets, situationPreset,
+      setPieces, oppositionInstructions,
+    }),
+    restoreSnapshot: (s) => {
+      if (!s) return;
+      if (s.formation) setFormation(s.formation);
+      if (s.assignment) setAssignment(s.assignment);
+      if (s.roleAssignment) setRoleAssignment(s.roleAssignment);
+      if (s.dutyAssignment) setDutyAssignment(s.dutyAssignment);
+      if (s.playerInstructions) setPlayerInstructions(s.playerInstructions);
+      if (s.teamInstructions) setTeamInstructions(s.teamInstructions);
+      if (s.pressing) setPressing(s.pressing);
+      if (s.tacticalDelegation) setTacticalDelegation(s.tacticalDelegation);
+      if (s.presets) setPresets(s.presets);
+      if (s.situationPreset) setSituationPreset(s.situationPreset);
+      if (s.setPieces) setSetPieces(s.setPieces);
+      if (s.oppositionInstructions) setOppositionInstructions(s.oppositionInstructions);
+    },
   };
 
   return <TacticsCtx.Provider value={value}>{children}</TacticsCtx.Provider>;

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useMemo, useCallback } from 'react';
 import { players as worldPlayers } from '../data/worldData.js';
 import { players as roster } from '../data/roster.js';
+import { useFinanceData } from './FinanceContext.jsx';
 
 const TransfersCtx = createContext(null);
 
@@ -82,7 +83,8 @@ function buildMarket() {
 }
 
 export function TransfersProvider({ children }) {
-  const [market] = useState(buildMarket);
+  const finance = useFinanceData();
+  const [market, setMarket] = useState(buildMarket);
   const [budget, setBudget] = useState({ total: 120_000_000, available: 120_000_000, wageAvailable: 320_000 });
   const [targetIds, setTargetIds] = useState([]);
   const [interestStars, setInterestStars] = useState({});
@@ -161,6 +163,7 @@ export function TransfersProvider({ children }) {
       if (!neg) return negs;
       const player = findPlayer(neg.playerId);
       setBudget(b => ({ ...b, available: Math.max(0, b.available - neg.clubOffer), wageAvailable: Math.max(0, b.wageAvailable - (terms?.wage || 0)) }));
+      finance.addTransaction(`${player.name} signing fee — ${player.club}`, -neg.clubOffer, 'Transfers');
       setHistory(h => [{
         id: `hist-${negId}`, name: player.name, from: player.club, to: 'Man Utd', fee: neg.clubOffer,
         date: 'Today', type: 'Transfer', wage: terms?.wage || 0, years: terms?.years || 4,
@@ -169,17 +172,22 @@ export function TransfersProvider({ children }) {
       pushNews(`${player.name} completes his move to Manchester United`);
       return negs.map(n => n.id === negId ? { ...n, status: 'Completed' } : n);
     });
-  }, [findPlayer, pushNews]);
+  }, [findPlayer, pushNews, finance]);
 
   const respondIncoming = useCallback((offerId, action) => {
     setIncomingOffers(offers => offers.map(o => {
       if (o.id !== offerId) return o;
-      if (action === 'accept') { setBudget(b => ({ ...b, available: b.available + o.fee })); pushNews(`${o.fromClub} complete the signing of ${o.playerName}`); return { ...o, status: 'Accepted' }; }
+      if (action === 'accept') {
+        setBudget(b => ({ ...b, available: b.available + o.fee }));
+        finance.addTransaction(`${o.playerName} sale — ${o.fromClub}`, o.fee, 'Player Sales');
+        pushNews(`${o.fromClub} complete the signing of ${o.playerName}`);
+        return { ...o, status: 'Accepted' };
+      }
       if (action === 'reject') return { ...o, status: 'Rejected' };
       if (action === 'counter') return { ...o, fee: Math.round(o.fee * 1.15), status: 'Countered' };
       return o;
     }));
-  }, [pushNews]);
+  }, [pushNews, finance]);
 
   const toggleLoanListed = useCallback((rosterPlayer) => {
     setLoansOut(lo => {
@@ -224,6 +232,28 @@ export function TransfersProvider({ children }) {
     return { ok: true };
   }, [findPlayer, pushNews]);
 
+  // AI managers actually making decisions — a rival club genuinely signs a
+  // player from the wider market, changing that player's club for real
+  // (so they show up at their new club everywhere from then on), not just
+  // a news headline with no consequence behind it.
+  const simulateAITransferActivity = useCallback(() => {
+    // Compute the move from current market state directly, not inside the
+    // setState updater — same timing hazard as the Player of the Month
+    // bug: relying on the updater running synchronously before the next
+    // line reads the result is not guaranteed.
+    const candidates = market.filter(p => !p.isOwn && p.status !== 'Not Interested' && p.interest?.length > 0);
+    if (!candidates.length) return null;
+    const player = candidates[Math.floor(Math.random() * candidates.length)];
+    const buyer = player.interest[Math.floor(Math.random() * player.interest.length)]?.club;
+    if (!buyer || buyer === player.club) return null;
+    const moved = { name: player.name, from: player.club, to: buyer };
+    setMarket(mkt => mkt.map(p => p.id === player.id
+      ? { ...p, club: buyer, status: 'Not Interested', interest: [], contractExpiry: p.contractExpiry }
+      : p));
+    pushNews(`${moved.name} completes a move from ${moved.from} to ${moved.to}.`);
+    return moved;
+  }, [market, pushNews]);
+
   const value = useMemo(() => ({
     market, budget, setBudget,
     targetIds, addTarget, removeTarget, interestStars, setStars,
@@ -231,11 +261,30 @@ export function TransfersProvider({ children }) {
     incomingOffers, respondIncoming,
     loansOut, loansIn, toggleLoanListed,
     transferListedRosterIds, toggleTransferListed,
-    loanApproaches, approachTransfer, approachLoan,
+    loanApproaches, approachTransfer, approachLoan, simulateAITransferActivity,
     history, signings, news, pushNews,
     findPlayer, formatEUR, formatEURShort,
+    getSnapshot: () => ({
+      budget, targetIds, interestStars, negotiations, incomingOffers, loansOut, loansIn,
+      transferListedRosterIds, loanApproaches, history, signings, news,
+    }),
+    restoreSnapshot: (s) => {
+      if (!s) return;
+      if (s.budget) setBudget(s.budget);
+      if (s.targetIds) setTargetIds(s.targetIds);
+      if (s.interestStars) setInterestStars(s.interestStars);
+      if (s.negotiations) setNegotiations(s.negotiations);
+      if (s.incomingOffers) setIncomingOffers(s.incomingOffers);
+      if (s.loansOut) setLoansOut(s.loansOut);
+      if (s.loansIn) setLoansIn(s.loansIn);
+      if (s.transferListedRosterIds) setTransferListedRosterIds(s.transferListedRosterIds);
+      if (s.loanApproaches) setLoanApproaches(s.loanApproaches);
+      if (s.history) setHistory(s.history);
+      if (s.signings) setSignings(s.signings);
+      if (s.news) setNews(s.news);
+    },
   }), [market, budget, targetIds, interestStars, negotiations, incomingOffers, loansOut, loansIn,
-      transferListedRosterIds, loanApproaches, history, signings, news, findPlayer, toggleTransferListed, approachTransfer, approachLoan]);
+      transferListedRosterIds, loanApproaches, history, signings, news, findPlayer, toggleTransferListed, approachTransfer, approachLoan, simulateAITransferActivity]);
 
   return <TransfersCtx.Provider value={value}>{children}</TransfersCtx.Provider>;
 }

@@ -8,6 +8,7 @@ import { useCompetitionData } from './store/CompetitionContext.jsx';
 import { useTacticsData } from './store/TacticsContext.jsx';
 import { useSimulation } from './store/SimulationContext.jsx';
 import { players as roster } from './data/roster.js';
+import { fixtureDetail } from './data/fixtureDetail.js';
 import TacticsScreen from './Tactics.jsx';
 
 const TABS = ['Matchday', 'Team Selection', 'Tactics', 'Opponent Analysis', 'Match Preview', 'Match Plan'];
@@ -34,6 +35,7 @@ function ordinal(n) {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+
 export default function MatchdayScreen({ setActive }) {
   const [tab, setTab] = useState('Matchday');
   const { league } = useCompetitionData();
@@ -46,6 +48,7 @@ export default function MatchdayScreen({ setActive }) {
   const oppRow = league.table.find(r => r.club === oppName);
   const weAreHome = fixture ? fixture.home === 'Man Utd' : true;
   const opp = opponentProfile(oppName);
+  const fixDetail = fixtureDetail(fixture, weAreHome);
 
   const bench = roster.filter(p => !startXI.some(s => s.id === p.id) && p.playTime !== 'Youth').sort((a, b) => b.ovr - a.ovr).slice(0, 5);
   const reserves = roster.filter(p => !startXI.some(s => s.id === p.id) && !bench.some(b => b.id === p.id) && p.playTime !== 'Youth').slice(0, 5);
@@ -69,7 +72,7 @@ export default function MatchdayScreen({ setActive }) {
         <div className="mday-vs"><b>VS</b><small>{fixture?.time || '17:30'}</small></div>
         <div className="mday-team"><div className="crest-sq brighton">{oppName.split(' ').map(w=>w[0]).join('').slice(0,3)}</div><b>{oppName.toUpperCase()}</b><span>{oppRow ? `${ordinal(oppRow.pos)} · ${oppRow.pts} pts` : ''}</span></div>
       </div>
-      <div className="mday-sub">Old Trafford · {fixture?.date === 'Today' ? 'Today' : fixture?.date}</div>
+      <div className="mday-sub">{fixDetail.venue} · {fixture?.date === 'Today' ? 'Today' : fixture?.date}</div>
     </div>
 
     <div className="mday-tabs">{TABS.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
@@ -100,7 +103,9 @@ export default function MatchdayScreen({ setActive }) {
           <h3><FileText size={15} /> Match Information</h3>
           <div className="mday-mini-row"><Trophy size={13} /><span>Premier League</span></div>
           <div className="mday-mini-row"><Clock3 size={13} /><span>{fixture?.date === 'Today' ? 'Today' : fixture?.date}, {fixture?.time}</span></div>
-          <div className="mday-mini-row"><Cloud size={13} /><span>Old Trafford · 16°C, Partly Cloudy</span></div>
+          <div className="mday-mini-row"><Cloud size={13} /><span>{fixDetail.venue} · {fixDetail.weather}</span></div>
+          <div className="mday-mini-row"><span>Attendance</span><b>{fixDetail.attendance.toLocaleString()} / {fixDetail.capacity.toLocaleString()}</b></div>
+          <div className="mday-mini-row"><span>Referee</span><b>{fixDetail.referee}</b></div>
           <p className="mday-label" style={{ marginTop: 10 }}>Last 5 Meetings</p>
           {lastMeetings.map((m, i) => <div className="mday-meeting-row" key={i}><span>{m.home}</span><b>{m.score}</b><span>{m.away}</span></div>)}
         </section>

@@ -456,13 +456,33 @@ function carrierStep(state) {
     carrier.action = 'carrier';
     state.ballX = carrier.x; state.ballY = carrier.y;
 
-    const presser = outfield(defXI).find(d => state.pressers?.includes(d.id) && d.tackleCooldown<=0 && distance(d,carrier)<3.2);
+    const presser = outfield(defXI).find(d => state.pressers?.includes(d.id) && d.tackleCooldown<=0 && !d.redCard && distance(d,carrier)<3.2);
     if (presser) {
       presser.tackleCooldown = 14;
       const win = clamp(30 + (effAttr(presser,'tackling')-effAttr(carrier,'dribbling'))*.5 + (effAttr(presser,'aggression')-50)*.15, 8, 78);
       if (Math.random()*100 < win*0.10) {
         state.stats[side==='home'?'away':'home'].fouls++;
-        log(state, `${presser.name} fouls ${carrier.name}.`, 'foul', side==='home'?'away':'home');
+        // Cards are a real consequence now, not just a foul counter — most
+        // fouls are just fouls, some earn a yellow, a rare few a straight
+        // red (or a second yellow). The engine doesn't remodel the pitch
+        // for a sent-off player (too risky to the tuned simulation), but
+        // the card itself is real and gets read back into the player's
+        // live state after full-time.
+        const cardRoll = Math.random();
+        if (cardRoll < 0.05) {
+          presser.redCard = true;
+          log(state, `${presser.name} fouls ${carrier.name} and is shown a RED CARD!`, 'card', side==='home'?'away':'home');
+        } else if (cardRoll < 0.28) {
+          presser.yellowCards = (presser.yellowCards||0)+1;
+          if (presser.yellowCards >= 2) {
+            presser.redCard = true;
+            log(state, `${presser.name} is booked again — second yellow, RED CARD!`, 'card', side==='home'?'away':'home');
+          } else {
+            log(state, `${presser.name} fouls ${carrier.name} and is booked.`, 'card', side==='home'?'away':'home');
+          }
+        } else {
+          log(state, `${presser.name} fouls ${carrier.name}.`, 'foul', side==='home'?'away':'home');
+        }
         state.dribbleTicksLeft = 5; state.dribbleTargetSet = false;
         return;
       }

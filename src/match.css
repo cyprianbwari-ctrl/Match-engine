@@ -241,3 +241,5 @@
 .pm-rating-row{display:flex;justify-content:space-between;align-items:center;background:#0a0f28;border:1px solid #2a3567;border-radius:7px;padding:7px 10px;font-size:11px}
 .pm-rating-row em{font-style:normal;background:#68ff2e;color:#06210a;font-weight:900;border-radius:5px;padding:1px 7px;font-size:10.5px}
 .pm-rating-row em.low{background:#525f8c;color:#fff}
+.feed-row.card span{color:#f2c94c;font-weight:700}
+.ev-tag.card{background:#f2c94c;color:#2b2205}

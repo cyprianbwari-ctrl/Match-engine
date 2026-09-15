@@ -8,6 +8,8 @@ import { useSimulation } from './store/SimulationContext.jsx';
 import { useCompetitionData } from './store/CompetitionContext.jsx';
 import { useTransfersData } from './store/TransfersContext.jsx';
 import { useCommunicationData } from './store/CommunicationContext.jsx';
+import { useFinanceData } from './store/FinanceContext.jsx';
+import { usePlayerState } from './store/PlayerStateContext.jsx';
 import { players as roster } from './data/roster.js';
 
 const DURATIONS = [
@@ -28,6 +30,8 @@ export default function SimulationWindow({ goTo }) {
   const { league, simulateMatchday } = useCompetitionData();
   const transfers = useTransfersData();
   const { addMessage, addNews } = useCommunicationData();
+  const finance = useFinanceData();
+  const playerState = usePlayerState();
 
   const [mode, setMode] = useState(null); // null | 'day' | 'match' | 'week' | 'vacation'
   const [running, setRunning] = useState(false);
@@ -61,6 +65,17 @@ export default function SimulationWindow({ goTo }) {
     }, ...prev].slice(0, 12));
     logEvent({ type: 'goal', title: result.usWon ? 'FULL TIME — WIN' : 'FULL TIME', body: `${result.home} ${result.homeGoals} - ${result.awayGoals} ${result.away}` });
     addNews({ category: 'Match Result', bucket: 'Football News', crest: result.home, headline: `${result.home} ${result.homeGoals}-${result.awayGoals} ${result.away}`, body: `Full time in the Premier League.` });
+
+    // This round included our own fixture — record matchday income exactly
+    // like a manually-played match would, so vacations don't silently skip
+    // real financial consequences.
+    const weAreHome = result.home === 'Man Utd';
+    const won = result.usWon;
+    const base = weAreHome ? 2_400_000 + Math.round(Math.random() * 1_600_000) : 350_000 + Math.round(Math.random() * 250_000);
+    finance.addTransaction(
+      weAreHome ? `Matchday Revenue vs ${result.away}` : `Away Day Share — ${result.home}`,
+      won ? Math.round(base * 1.15) : base, 'Matchday Revenue',
+    );
   }
 
   function maybeRaiseDecision() {
@@ -81,15 +96,40 @@ export default function SimulationWindow({ goTo }) {
   }
 
   function stepOneDay() {
+    const prevDate = sim.now;
     sim.advanceClockOneDay();
     sim.setLastSavedAt(new Date().toLocaleTimeString().slice(0, 5));
     setDaysDone(d => d + 1);
+
+    // Player live-state recovery/injury-clearance ticks forward exactly
+    // once per simulated day, keyed to the date the clock is advancing to.
+    const newDate = new Date(prevDate); newDate.setDate(newDate.getDate() + 1);
+    const newlyInjured = playerState.advanceDay(newDate.toDateString());
+    newlyInjured.forEach(inj => {
+      addNews({ category: 'Injury', bucket: 'Club News', crest: 'Man Utd', headline: `${inj.name} injured in training — ${inj.type}`, body: `Expected back around ${inj.expectedReturn}.` });
+      logEvent({ type: 'info', title: 'Injury', body: `${inj.name} picks up a knock (${inj.type}).` });
+    });
+    if (prevDate && newDate.getMonth() !== prevDate.getMonth()) {
+      const monthLabel = newDate.toLocaleString('en-GB', { month: 'short', year: 'numeric' });
+      playerState.applyMonthlyDevelopment(monthLabel);
+      const potm = playerState.recordPlayerOfMonthAward(monthLabel);
+      if (potm) {
+        addNews({ category: 'Awards', bucket: 'Football News', crest: 'Man Utd', headline: `${potm.name} named Player of the Month`, body: `Averaged a ${potm.avgRating} rating in ${monthLabel.split(' ')[0]}.` });
+        logEvent({ type: 'info', title: 'Award', body: `${potm.name} wins Player of the Month.` });
+      }
+    }
 
     // Background world — routine club life continues every simulated day.
     const routineRoll = Math.random();
     if (routineRoll > 0.7) {
       addMessage({ subject: 'Training Report', preview: 'First-team training completed — fitness levels trending upward.', tag: 'Staff', kind: 'staff', sender: 'Coaching Staff' });
       logEvent({ type: 'info', title: 'Training', body: 'First-team session completed at Carrington.' });
+    }
+    // AI managers actually making moves — a real, occasional consequence
+    // in the wider transfer market, not just decorative news headlines.
+    if (Math.random() < 0.04) {
+      const moved = transfers.simulateAITransferActivity();
+      if (moved) logEvent({ type: 'transfer', title: 'Transfer News', body: `${moved.name}: ${moved.from} → ${moved.to}.` });
     }
 
     const arrivingAtMatch = sim.daysUntilMatch <= 1;
@@ -166,7 +206,7 @@ export default function SimulationWindow({ goTo }) {
     // and resolved again on the next tick instead of seeing its updated
     // status.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, paused, decision, mode, daysTarget, transfers, league]);
+  }, [running, paused, decision, mode, daysTarget, transfers, league, finance, playerState]);
 
   useEffect(() => {
     if (running && !paused && !decision && daysDone >= daysTarget && daysTarget > 0) {

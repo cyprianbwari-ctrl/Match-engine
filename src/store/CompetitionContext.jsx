@@ -179,6 +179,13 @@ export function CompetitionProvider({ children }) {
     return {
       league, cups, continental, continentalList, history, activeCompetitions, allResults: allResultsTop, allFixtures, form, keyStats, objectives,
       simulateMatchday, recordUserMatchResult,
+      getSnapshot: () => ({ leagueTable, leagueFixtures, leagueResults }),
+      restoreSnapshot: (s) => {
+        if (!s) return;
+        if (s.leagueTable) setLeagueTable(s.leagueTable);
+        if (s.leagueFixtures) setLeagueFixtures(s.leagueFixtures);
+        if (s.leagueResults) setLeagueResults(s.leagueResults);
+      },
     };
   }, [leagueTable, leagueFixtures, leagueResults, simulateMatchday, recordUserMatchResult]);
 

@@ -185,3 +185,9 @@
 
 @media(max-width:1300px){.tac-grid{grid-template-columns:1fr 1fr}.tac-right{grid-column:1/-1}}
 @media(max-width:900px){.tac-grid{grid-template-columns:1fr}}
+.dotlg.red{background:#ef4f4f}
+.avail-row.unavailable{opacity:.5}
+.avail-row.unavailable .avail-add{cursor:not-allowed}
+.avail-flag{font-style:normal;font-size:8.5px;font-weight:900;padding:2px 6px;border-radius:5px}
+.avail-flag.injured{background:#ef4f4f33;color:#ff8080}
+.avail-flag.suspended{background:#f2c94c33;color:#f2c94c}

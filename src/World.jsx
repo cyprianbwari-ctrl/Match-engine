@@ -7,6 +7,7 @@ import {
 import './world.css';
 import { useWorldData } from './store/WorldContext.jsx';
 import { useTransfersData } from './store/TransfersContext.jsx';
+import { usePlayerState } from './store/PlayerStateContext.jsx';
 import { generateFullAttributes, generatePositionsRoles, generateCareer, generateDevelopment } from './data/playerProfileData.js';
 
 // ---------- Shared bits ----------
@@ -57,6 +58,7 @@ const MORALE_EMOJI = { Good: '🙂', Okay: '😐', Unhappy: '😠', 'Very Good':
 export function PlayerProfileModal({ goTo }) {
   const { selectedPlayer: p, profileOpen, setProfileOpen, toggleShortlist, shortlist, addScout, scouted, profileSource } = useWorldData();
   const transfers = useTransfersData();
+  const playerState = usePlayerState();
   const [tab, setTab] = useState('Overview');
   const [loanMsg, setLoanMsg] = useState('');
   React.useEffect(() => { setTab('Overview'); setLoanMsg(''); }, [p?.id]);
@@ -75,6 +77,7 @@ export function PlayerProfileModal({ goTo }) {
   const isShortlisted = shortlist.includes(p.id);
   const isScouted = scouted.includes(p.id);
   const rosterId = p.rosterId ?? (typeof p.id === 'string' && p.id.startsWith('own-') ? Number(p.id.slice(4)) : null);
+  const live = rosterId != null ? playerState.getLive(rosterId) : null;
 
   const potential = p.potential ?? p.pot ?? Math.min(96, rating + 5);
   const career = (p.career && p.career.length) ? p.career : generateCareer(p.id, p.club, p.age || 24);
@@ -198,7 +201,11 @@ export function PlayerProfileModal({ goTo }) {
             <div className="pp-row"><span>Wage</span><b>{typeof p.wage === 'string' ? p.wage : moneyDisplay(p.wage) + '/week'}</b></div>
             <div className="pp-row"><span>Release Clause</span><b>{moneyDisplay((p.value || rating * 1_500_000) * 1.6)}</b></div>
             <div className="pp-row"><span>Squad Status</span><b>{p.tacticalRole || p.status || '—'}</b></div>
-            <div className="pp-row"><span>Playing Time Promise</span><b>None agreed</b></div>
+            <div className="pp-row"><span>Agent</span><b>{live?.agent || 'Unrepresented'}</b></div>
+            {isOwn && live && <div className="pp-block">
+              <span>Contract History</span>
+              {live.contractHistory.slice().reverse().map((h, i) => <div className="pp-interest-row" key={i}><b>{h.event}</b><em className="int-lvl low">{h.date}</em></div>)}
+            </div>}
           </section>}
 
           {tab === 'Transfer' && <section className="pp-card">
@@ -217,24 +224,40 @@ export function PlayerProfileModal({ goTo }) {
             <h3>Development</h3>
             <div className="pp-dev-row"><span>Current Ability</span><StarRow value={rating} /><b>{rating}</b></div>
             <div className="pp-dev-row"><span>Potential Ability</span><StarRow value={potential} /><b>{potential}</b></div>
-            <div className="pp-row"><span>Development Trend</span><b className={dev.trend === 'Improving' ? 'good' : dev.trend === 'Declining' ? 'warn' : ''}>{dev.trend === 'Improving' ? '↗ ' : dev.trend === 'Declining' ? '↘ ' : '— '}{dev.trend}</b></div>
-            <div className="pp-block"><span>Training Progress</span><div className="pref-track big"><i style={{ width: `${dev.trainingProgress}%` }} /></div><b>{dev.trainingProgress}%</b></div>
+            <div className="pp-row"><span>Development Trend</span><b className={(live?.developmentTrend || dev.trend) === 'Improving' ? 'good' : (live?.developmentTrend || dev.trend) === 'Declining' ? 'warn' : ''}>{(live?.developmentTrend || dev.trend) === 'Improving' ? '↗ ' : (live?.developmentTrend || dev.trend) === 'Declining' ? '↘ ' : '— '}{live?.developmentTrend || dev.trend}</b></div>
+            <div className="pp-block"><span>Training Progress</span><div className="pref-track big"><i style={{ width: `${live?.trainingProgress ?? dev.trainingProgress}%` }} /></div><b>{live?.trainingProgress ?? dev.trainingProgress}%</b></div>
+            {live?.abilityHistory && <div className="pp-block"><span>Ability History</span>
+              {live.abilityHistory.slice(-5).map((h, i) => <div className="pp-interest-row" key={i}><b>{h.date}</b><em className="int-lvl low">CA {h.ca}</em></div>)}
+            </div>}
+            {live?.personality && <div className="pp-block"><span>Personality</span>
+              {Object.entries(live.personality).map(([k, v]) => <div className="pp-attr-row" key={k}><span style={{ textTransform: 'capitalize' }}>{k.replace(/([A-Z])/g, ' $1')}</span><b>{v}</b></div>)}
+            </div>}
+            {live?.relationships && <div className="pp-block"><span>Relationships</span>
+              {Object.entries(live.relationships).map(([k, v]) => <div className="pp-attr-row" key={k}><span style={{ textTransform: 'capitalize' }}>{k}</span><b className={v >= 70 ? 'good' : v < 40 ? 'warn' : ''}>{v}</b></div>)}
+            </div>}
           </section>}
 
           {tab === 'Career' && <section className="pp-card">
             <h3>Career History</h3>
             <div className="pp-career-head"><span>Season</span><span>Club</span><span>Apps</span><span>Goals</span><span>Assists</span></div>
             {career.map((c, i) => <div className="pp-career-row" key={i}><b>{c.season}</b><span>{c.club}</span><span>{c.apps}</span><span>{c.goals}</span><span>{c.assists}</span></div>)}
+            {live?.careerStats && <div className="pp-career-row" style={{ borderTop: '1px solid #2a3567', marginTop: 4, paddingTop: 8 }}><b>FAMILY 26 Career</b><span>Man Utd</span><span>{live.careerStats.apps}</span><span>{live.careerStats.goals}</span><span>{live.careerStats.assists}</span></div>}
           </section>}
 
           {tab === 'Stats' && <section className="pp-card">
             <h3>Season Statistics</h3>
             <div className="pp-stat-cards">
-              <div><span>Appearances</span><b>{career[0]?.apps ?? 0}</b></div>
-              <div><span>Goals</span><b>{career[0]?.goals ?? 0}</b></div>
-              <div><span>Assists</span><b>{career[0]?.assists ?? 0}</b></div>
-              <div><span>Avg Rating</span><b>{formAvg}</b></div>
+              <div><span>Appearances</span><b>{live?.seasonStats?.apps ?? career[0]?.apps ?? 0}</b></div>
+              <div><span>Goals</span><b>{live?.seasonStats?.goals ?? career[0]?.goals ?? 0}</b></div>
+              <div><span>Assists</span><b>{live?.seasonStats?.assists ?? career[0]?.assists ?? 0}</b></div>
+              <div><span>Avg Rating</span><b>{live?.seasonStats?.avgRating ?? formAvg}</b></div>
             </div>
+            {live?.seasonStats && <div className="pp-stat-cards" style={{ marginTop: 10 }}>
+              <div><span>Shots</span><b>{live.seasonStats.shots}</b></div>
+              <div><span>Tackles</span><b>{live.seasonStats.tackles}</b></div>
+              <div><span>Pass Completion</span><b>{live.seasonStats.passesAttempted ? Math.round(live.seasonStats.passesCompleted / live.seasonStats.passesAttempted * 100) : 0}%</b></div>
+              <div><span>Yellow / Red</span><b>{live.seasonStats.yellowCards} / {live.seasonStats.redCards}</b></div>
+            </div>}
             <h3 style={{ marginTop: 14 }}>Recent Form</h3>
             <div className="form-row">{(p.recentResults || ['W', 'D', 'W', 'W', 'L']).map((r, i) => <ResultBadge r={r} key={i} />)}</div>
           </section>}

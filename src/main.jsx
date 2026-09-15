@@ -23,6 +23,8 @@ import MatchScreen from "./Match.jsx";
 import GlobalSearch from "./GlobalSearch.jsx";
 import SimulationWindow from "./SimulationWindow.jsx";
 import MatchdayScreen from "./Matchday.jsx";
+import SettingsScreen from "./Settings.jsx";
+import { SaveProvider, useSaveData } from "./store/SaveContext.jsx";
 import { StaffProvider } from "./store/StaffContext.jsx";
 import { CompetitionProvider, useCompetitionData } from "./store/CompetitionContext.jsx";
 import { CommunicationProvider, useCommunicationData } from "./store/CommunicationContext.jsx";
@@ -32,12 +34,16 @@ import { TrainingProvider } from "./store/TrainingContext.jsx";
 import { TacticsProvider } from "./store/TacticsContext.jsx";
 import { SimulationProvider, useSimulation } from "./store/SimulationContext.jsx";
 import { TransfersProvider } from "./store/TransfersContext.jsx";
+import { FinanceProvider } from "./store/FinanceContext.jsx";
+import { PlayerStateProvider } from "./store/PlayerStateContext.jsx";
+import { ManagerProvider } from "./store/ManagerContext.jsx";
+import { ClubStateProvider } from "./store/ClubStateContext.jsx";
 
 const nav = [
   ["Home",Home],["Squad",Users],["Tactics",Crosshair],["Training",Dumbbell],
   ["Scouting",Search],["Transfers",ArrowLeftRight],["Staff",UserRound],
   ["Finance",Coins],["Competitions",Trophy],["Communications",MessageSquare],
-  ["World",Globe2],["Club Dashboard",Shield]
+  ["World",Globe2],["Club Dashboard",Shield],["Settings",Settings]
 ];
 
 function Crest({letters="MU", small=false}) {
@@ -46,6 +52,7 @@ function Crest({letters="MU", small=false}) {
 
 function Header({ onMenuClick, onSearchClick, setActive }) {
   const sim = useSimulation();
+  const save = useSaveData();
   const { league, simulateMatchday } = useCompetitionData();
   const { unreadCount, addMessage, addNews } = useCommunicationData();
 
@@ -65,7 +72,7 @@ function Header({ onMenuClick, onSearchClick, setActive }) {
     <div className="header-spacer"/>
     <div className="date-block"><CalendarDays size={17}/><div>{sim.dateLabel}<span>{sim.timeLabel}</span></div></div>
     <div className="status-pill"><i className={sim.gameStatus.pulse ? 'pulse' : ''} style={{background:sim.gameStatus.color}}/><span style={{color:sim.gameStatus.color}}>{sim.matchLocked ? 'Match In Progress' : sim.gameStatus.label}</span></div>
-    {!sim.liveMatch && !sim.matchLocked && <button className="cloud-save-block"><Cloud size={19}/><div>Cloud Save<span>Saved {sim.lastSavedAt}</span></div></button>}
+    {!sim.liveMatch && !sim.matchLocked && <button className="cloud-save-block" onClick={()=>setActive('Settings')} title="Auto-save enabled"><Cloud size={19}/><div>Cloud Save<span>{save.lastSavedAt ? `Saved ${save.lastSavedAt.toLocaleTimeString().slice(0,5)}` : `Saved ${sim.lastSavedAt}`}</span></div></button>}
     <button className="search-btn" onClick={onSearchClick} disabled={sim.matchLocked} style={sim.matchLocked?{opacity:.35,cursor:'default'}:undefined}><Search size={21}/></button>
     <div className="bell"><Bell size={21}/>{unreadCount>0 && !sim.matchLocked && <i>{unreadCount}</i>}</div>
     {sim.matchLocked
@@ -90,13 +97,30 @@ function MainArea({ children }) {
   return <main className={sim.simWindowOpen ? 'main-disabled' : ''} inert={sim.simWindowOpen || undefined}>{children}</main>;
 }
 
+function RecoveryPrompt() {
+  const { recovery, recoverSession, discardRecovery } = useSaveData();
+  if (!recovery) return null;
+  const savedTime = recovery.savedAt ? new Date(recovery.savedAt).toLocaleString() : 'Unknown time';
+  return <div className="recovery-backdrop">
+    <div className="recovery-panel">
+      <h2>RECOVER CAREER?</h2>
+      <p>An unsaved session was detected.</p>
+      <div className="recovery-date">{recovery.dateLabel || savedTime}</div>
+      <div className="recovery-actions">
+        <button className="recovery-discard" onClick={discardRecovery}>Discard</button>
+        <button className="recovery-recover" onClick={recoverSession}>Recover</button>
+      </div>
+    </div>
+  </div>;
+}
+
 function App() {
   const [active,setActive]=useState("Home");
   const [searchOpen,setSearchOpen]=useState(false);
   const [sidebarCollapsed,setSidebarCollapsed]=useState(false);
   const navigateTo = (screen) => setActive(screen);
 
-  return <StaffProvider><CompetitionProvider><CommunicationProvider><WorldProvider><ClubProvider><TrainingProvider><TacticsProvider><TransfersProvider><SimulationProvider onGoToMatch={()=>setActive('Match')}><div className="app">
+  return <StaffProvider><CompetitionProvider><CommunicationProvider><WorldProvider><ClubProvider><ClubStateProvider><TrainingProvider><PlayerStateProvider><TacticsProvider><FinanceProvider><TransfersProvider><ManagerProvider><SimulationProvider onGoToMatch={()=>setActive('Match')}><SaveProvider><div className="app">
     <Header onMenuClick={()=>setSidebarCollapsed(c=>!c)} onSearchClick={()=>setSearchOpen(true)} setActive={setActive}/>
     <Sidebar active={active} setActive={setActive} collapsed={sidebarCollapsed}/>
     <MainArea>
@@ -126,11 +150,14 @@ function App() {
                   ? <MatchScreen setActive={setActive}/>
                 : active==="Matchday"
                   ? <MatchdayScreen setActive={setActive}/>
+                : active==="Settings"
+                  ? <SettingsScreen setActive={setActive}/>
                 : <TacticsScreen setActive={setActive}/>}
     </MainArea>
     <PlayerProfileModal goTo={setActive}/>
     <SimulationWindow goTo={setActive}/>
+    <RecoveryPrompt/>
     <GlobalSearch open={searchOpen} onClose={()=>setSearchOpen(false)} navigateTo={navigateTo}/>
-  </div></SimulationProvider></TransfersProvider></TacticsProvider></TrainingProvider></ClubProvider></WorldProvider></CommunicationProvider></CompetitionProvider></StaffProvider>
+  </div></SaveProvider></SimulationProvider></ManagerProvider></TransfersProvider></FinanceProvider></TacticsProvider></PlayerStateProvider></TrainingProvider></ClubStateProvider></ClubProvider></WorldProvider></CommunicationProvider></CompetitionProvider></StaffProvider>
 }
 createRoot(document.getElementById("root")).render(<App/>);
