@@ -26,6 +26,9 @@
 
 import { players as worldPlayers } from '../data/worldData.js';
 import { readinessScore, aiRotationNeed } from './fmMatchLabAdapter.js';
+import { interceptionTarget, getBallRetention, stepBallWithFriction } from './interception.js';
+import { calculateShotQuality, executeShot, resolveGoalkeeper, goalPostsFor } from './shooting.js';
+import { executePass } from './passing.js';
 
 export const FIXED_DT_MS = 50;
 export const FIXED_GAME_SECONDS = 0.5;
@@ -47,7 +50,7 @@ function seededRand(seed) {
 const ATTR_KEYS = [
   'finishing','passing','technique','dribbling','pace','positioning',
   'anticipation','composure','tackling','strength','vision','decisions',
-  'workRate','aggression','crossing','heading','offBall','acceleration'
+  'workRate','aggression','crossing','heading','offBall','acceleration','agility','balance','readGame','stamina'
 ];
 
 function hashId(id) {
@@ -61,9 +64,9 @@ export function synthAttrs(id, ovr, pos, clubStrength = ovr) {
   const base = Math.max(35, Math.min(92, Number(ovr) || clubStrength || 70));
   const positional = {
     GK:['positioning','anticipation','composure','decisions'],
-    ST:['finishing','pace','composure','offBall','acceleration'],
-    AML:['dribbling','pace','technique','offBall','acceleration'],
-    AMR:['dribbling','pace','technique','offBall','acceleration'],
+    ST:['finishing','pace','composure','offBall','acceleration','agility','balance','readGame','stamina'],
+    AML:['dribbling','pace','technique','offBall','acceleration','agility','balance','readGame','stamina'],
+    AMR:['dribbling','pace','technique','offBall','acceleration','agility','balance','readGame','stamina'],
     AMC:['vision','passing','technique','decisions','offBall'],
     MC:['passing','vision','decisions','workRate','offBall'],
     DM:['tackling','positioning','strength','anticipation','decisions'],
@@ -76,6 +79,8 @@ export function synthAttrs(id, ovr, pos, clubStrength = ovr) {
     const bump = positional.includes(k) ? 6 : 0;
     attrs[k] = Math.max(35, Math.min(99, Math.round(base + bump + (rand() - .5) * 12)));
   });
+  attrs.reflexes = attrs.anticipation;
+  attrs.curve = Math.max(35, Math.min(99, Math.round((attrs.technique + attrs.passing) / 2 + (rand() - .5) * 10)));
   return attrs;
 }
 
@@ -140,6 +145,7 @@ export function buildXI(pairs, teamSide) {
       ai: teamSide === 'away',
       teamSide,
       action: 'shape',
+      state: 'IN_POSITION', stateTimer: 0,
       targetX: x, targetY: y,
       tackleCooldown: 0,
       lastActionTick: 0,
@@ -217,9 +223,75 @@ function runTarget(p, state) {
 }
 
 // ============================================================================
-// Movement — runs every tick. Everyone interpolates toward ONE target chosen
-// by their role this tick (press / run / hold shape / carry).
+// Player FSM + movement physics.
+// The FSM answers "what should I do?"; steering answers "how do I get there?".
 // ============================================================================
+
+const PLAYER_STATES = {
+  IN_POSITION: 'IN_POSITION',
+  CHASING_BALL: 'CHASING_BALL',
+  WITH_BALL: 'WITH_BALL',
+  MAKING_RUN: 'MAKING_RUN',
+  MARKING: 'MARKING',
+  INTERCEPTING: 'INTERCEPTING',
+};
+
+function pressZoneFor(tactics, ball, teamSide) {
+  const dir = teamSide === 'home' ? 1 : -1;
+  const advanced = dir === 1 ? ball.x : 100 - ball.x;
+  const intensity = Number(tactics?.pressing?.intensity ?? 55);
+  const line = Number(tactics?.defensiveLine ?? 55);
+  const threshold = 25 + intensity * 0.28 + (line - 50) * 0.12;
+  return advanced > threshold;
+}
+
+function stateTarget(p, state) {
+  if (p.state === PLAYER_STATES.INTERCEPTING && Number.isFinite(p.interceptionX)) {
+    return { x: p.interceptionX, y: p.interceptionY };
+  }
+  if (p.state === PLAYER_STATES.CHASING_BALL) return { x: state.ballX, y: state.ballY };
+  if (p.state === PLAYER_STATES.MAKING_RUN) return runTarget(p, state);
+  if (p.state === PLAYER_STATES.MARKING && p.markTargetId) {
+    const opponents = p.teamSide === 'home' ? state.awayXI : state.homeXI;
+    const target = opponents.find(o => o.id === p.markTargetId);
+    if (target) return { x: target.x, y: target.y };
+  }
+  return shapeTarget(p, state);
+}
+
+function evaluateStateTransitions(p, state, roleContext) {
+  const tactics = p.teamSide === 'home' ? state.homeTactics : state.awayTactics;
+  const isCarrier = p.id === state.ballOwnerId;
+  if (isCarrier) return PLAYER_STATES.WITH_BALL;
+
+  if (p.stateTimer > 0) return p.state || PLAYER_STATES.IN_POSITION;
+  const ball = { x: state.ballX, y: state.ballY };
+  const defend = p.teamSide !== state.possession;
+
+  if (defend) {
+    const prediction = roleContext?.prediction;
+    if (prediction?.reachable && prediction.time < 8 && p.attrs?.anticipation >= 50) {
+      return PLAYER_STATES.INTERCEPTING;
+    }
+    const highPress = String(tactics?.pressing?.trigger || '').toLowerCase().includes('high') ||
+      Number(tactics?.pressing?.intensity ?? 55) >= 72;
+    const canPress = highPress ? true : pressZoneFor(tactics, ball, p.teamSide);
+    if (roleContext?.isPresser && canPress) return PLAYER_STATES.CHASING_BALL;
+    if (p.markTargetId) return PLAYER_STATES.MARKING;
+    return PLAYER_STATES.IN_POSITION;
+  }
+
+  if (roleContext?.isRunner && state.ballInFlight == null) return PLAYER_STATES.MAKING_RUN;
+  return PLAYER_STATES.IN_POSITION;
+}
+
+function updatePlayerState(p, nextState) {
+  if (p.state !== nextState) {
+    p.state = nextState;
+    p.action = nextState.toLowerCase();
+    p.stateTimer = Math.max(1, Math.round(7 - (effAttr(p, 'anticipation') / 20)));
+  }
+}
 
 function movementStep(state) {
   const ball = { x: state.ballX, y: state.ballY };
@@ -228,46 +300,72 @@ function movementStep(state) {
   const attackXI = attackSide === 'home' ? state.homeXI : state.awayXI;
   const defendXI = defendSide === 'home' ? state.homeXI : state.awayXI;
 
+  const predictiveTargets = new Map();
+  if (state.ballInFlight && state.ballInFlight.kind !== 'shot') {
+    const bv = { x: state.ballInFlight.vx || 0, y: state.ballInFlight.vy || 0 };
+    outfield(defendXI).forEach(def => {
+      const speed = Math.max(0.35, 0.55 + effAttr(def, 'pace') / 95 + effAttr(def, 'acceleration') / 150);
+      const prediction = interceptionTarget({ player: def, ball, ballVelocity: bv, speed, acceleration: Math.max(0.5, effAttr(def, 'acceleration') / 55), anticipation: effAttr(def, 'anticipation'), readGame: effAttr(def, 'decisions'), vision: effAttr(def, 'vision'), dt: FIXED_DT_MS / 1000, pitchCondition: state.pitchCondition || 'normal', ballRetention: state.ballRetention, maxTime: 4 });
+      if (prediction.reachable && prediction.time < 8) predictiveTargets.set(def.id, prediction);
+    });
+  }
+
   const pressers = new Set(pickPressers(defendXI, ball));
   state.pressers = [...pressers];
-
-  if (state.runnerId == null || state.tick - (state.runnerSetTick||0) > 12 || state.runnerTeam !== attackSide) {
+  if (state.runnerId == null || state.tick - (state.runnerSetTick || 0) > 12 || state.runnerTeam !== attackSide) {
     state.runnerId = pickRunner(attackXI, state);
     state.runnerSetTick = state.tick;
     state.runnerTeam = attackSide;
   }
 
-  const moveTo = (p, target, speedCap) => {
-    const dx = target.x - p.x, dy = target.y - p.y;
-    const d = Math.hypot(dx,dy) || 1;
-    const step = Math.min(d, speedCap);
-    p.x = clamp(p.x + (dx/d)*step, 1, 99);
-    p.y = clamp(p.y + (dy/d)*step, 1, 99);
-    p.distanceKm = (p.distanceKm||0) + step*1.05/1000*100;
-  };
-
   [state.homeXI, state.awayXI].forEach(xi => xi.forEach(p => {
-    if (p.id === state.ballOwnerId) return;
-    const pace = effAttr(p,'pace')/60;
-    if (p.pos === 'GK') {
-      const gx = p.teamSide==='home' ? clamp(6 + (state.ballX>75?2:0), 2, 12) : clamp(94 - (state.ballX<25?2:0), 88, 98);
-      p.action='cover';
-      moveTo(p, { x: gx, y: clamp(50 + (ball.y-50)*0.25, 38, 62) }, 0.6*pace);
-      return;
+    if (p.stateTimer > 0) p.stateTimer--;
+    if (p.id === state.ballOwnerId) { updatePlayerState(p, PLAYER_STATES.WITH_BALL); return; }
+    const prediction = predictiveTargets.get(p.id);
+    const next = evaluateStateTransitions(p, state, { isPresser: pressers.has(p.id), isRunner: p.id === state.runnerId, prediction });
+    updatePlayerState(p, next);
+    if (prediction && next === PLAYER_STATES.INTERCEPTING) {
+      p.interceptionX = prediction.x; p.interceptionY = prediction.y;
     }
-    if (p.teamSide === defendSide && pressers.has(p.id)) {
-      p.action = 'press';
-      moveTo(p, ball, 1.65*pace);
-      return;
-    }
-    if (p.teamSide === attackSide && p.id === state.runnerId && state.ballX > 15 && state.ballX < 85) {
-      p.action = 'run';
-      moveTo(p, runTarget(p, state), 1.55*pace);
-      return;
-    }
-    p.action = p.teamSide === attackSide ? 'support' : 'cover';
-    moveTo(p, shapeTarget(p, state), 0.95*pace);
+    const target = stateTarget(p, state);
+    steerPlayerToward(p, target, FIXED_DT_MS / 1000);
+    p.action = p.state === PLAYER_STATES.IN_POSITION ? (p.teamSide === attackSide ? 'support' : 'cover') : p.state.toLowerCase();
   }));
+}
+
+function movementMaxSpeed(p) {
+  const pace = clamp(effAttr(p, 'pace'), 1, 99);
+  const acceleration = clamp(effAttr(p, 'acceleration'), 1, 99);
+  return 0.22 + pace * 0.0085 + acceleration * 0.0025;
+}
+
+function steerPlayerToward(p, target, dt) {
+  const dx = target.x - p.x, dy = target.y - p.y;
+  const d = Math.hypot(dx, dy);
+  if (d < 0.12) {
+    p.x = target.x; p.y = target.y; p.vx *= 0.45; p.vy *= 0.45;
+    return;
+  }
+  const ux = dx / d, uy = dy / d;
+  const maxSpeed = movementMaxSpeed(p);
+  const arrivalRadius = 3.5;
+  const arrivalScale = d < arrivalRadius ? clamp(d / arrivalRadius, 0.18, 1) : 1;
+  const desiredVx = ux * maxSpeed * arrivalScale;
+  const desiredVy = uy * maxSpeed * arrivalScale;
+  const agility = clamp(effAttr(p, 'agility') || (50 + effAttr(p, 'balance') * 0.25), 10, 99);
+  const acceleration = maxSpeed * (0.75 + agility / 120) * dt * 12;
+  const steerX = clamp(desiredVx - (p.vx || 0), -acceleration, acceleration);
+  const steerY = clamp(desiredVy - (p.vy || 0), -acceleration, acceleration);
+  p.vx = (p.vx || 0) + steerX;
+  p.vy = (p.vy || 0) + steerY;
+  const speed = Math.hypot(p.vx, p.vy);
+  if (speed > maxSpeed) { p.vx *= maxSpeed / speed; p.vy *= maxSpeed / speed; }
+  const stepX = p.vx * dt * 12;
+  const stepY = p.vy * dt * 12;
+  const step = Math.hypot(stepX, stepY);
+  if (step >= d) { p.x = target.x; p.y = target.y; p.vx = 0; p.vy = 0; }
+  else { p.x = clamp(p.x + stepX, 1, 99); p.y = clamp(p.y + stepY, 1, 99); }
+  p.distanceKm = (p.distanceKm || 0) + step * 0.105 / 100;
 }
 
 // ============================================================================
@@ -277,18 +375,50 @@ function movementStep(state) {
 
 function launchBall(state, from, toX, toY, kind, meta={}) {
   state.ballOwnerId = null;
-  state.ballInFlight = { fromId: from.id, toX, toY, kind, meta, attempted: new Set(), ticks: 0 };
+  const dx = toX - state.ballX;
+  const dy = toY - state.ballY;
+  const d = Math.hypot(dx, dy) || 1;
+  const speed = kind === 'shot' ? (meta.power || 7.5) : kind === 'through-pass' ? 5.6 : 4.6;
+  const curl = Number(meta.curl) || 0;
+  const sideSign = Number(meta.curlSign) || 1;
+  const vx = Number.isFinite(meta.vx) ? meta.vx : dx / d * speed;
+  const vy = Number.isFinite(meta.vy) ? meta.vy : dy / d * speed;
+  state.ballInFlight = {
+    fromId: from.id, toX, toY, kind, meta, attempted: new Set(), ticks: 0,
+    vx, vy,
+    curl, curlSign: sideSign, elevation: meta.elevation || 0,
+    curlDecay: meta.curlDecay || 0.965,
+    retention: getBallRetention({ pitchCondition: state.pitchCondition, ballRetention: state.ballRetention }),
+  };
 }
 
 function flightStep(state) {
   const f = state.ballInFlight;
   f.ticks++;
-  const speed = f.kind === 'shot' ? 7.5 : f.kind === 'through-pass' ? 5.6 : 4.6;
-  const dx = f.toX - state.ballX, dy = f.toY - state.ballY;
-  const d = Math.hypot(dx,dy) || 1;
-  const step = Math.min(d, speed);
-  state.ballX = clamp(state.ballX + (dx/d)*step, 0, 100);
-  state.ballY = clamp(state.ballY + (dy/d)*step, 0, 100);
+  const dt = FIXED_DT_MS / 1000;
+  const before = { x: state.ballX, y: state.ballY };
+  const speedBefore = Math.hypot(f.vx, f.vy);
+  const next = stepBallWithFriction({ x: state.ballX, y: state.ballY, vx: f.vx, vy: f.vy }, {
+    dt, retention: f.retention ?? getBallRetention({ pitchCondition: state.pitchCondition, ballRetention: state.ballRetention })
+  });
+  const remainingX = f.toX - next.x, remainingY = f.toY - next.y;
+  const remaining = Math.hypot(remainingX, remainingY);
+  const intended = Math.hypot(f.toX - before.x, f.toY - before.y);
+  state.ballX = clamp(next.x, 0, 100);
+  state.ballY = clamp(next.y, 0, 100);
+  f.vx = next.vx; f.vy = next.vy;
+
+  // Magnus-style lateral steering. The force is perpendicular to the current
+  // velocity and decays every tick, so the shot bends early and straightens.
+  if ((f.kind === 'shot' || f.kind === 'pass' || f.kind === 'through-pass') && f.curl > 0) {
+    const v = Math.hypot(f.vx, f.vy);
+    if (v > 0.01) {
+      const nx = -f.vy / v, ny = f.vx / v;
+      const curlForce = f.curl * f.curlSign * Math.pow(f.curlDecay, f.ticks);
+      f.vx += nx * curlForce * dt;
+      f.vy += ny * curlForce * dt;
+    }
+  }
 
   if (state.ballY <= 0.5 || state.ballY >= 99.5) {
     log(state, 'The ball goes out for a throw-in.', 'info', null);
@@ -320,12 +450,16 @@ function flightStep(state) {
     }
   }
 
-  if (d <= step + 0.5) {
+  // The intended receiver can control the ball once the flight reaches the
+  // target. If friction makes the ball stop short, the normal failed-pass
+  // path below resolves possession rather than teleporting the ball.
+  const arrived = remaining <= Math.max(0.5, speedBefore * dt + 0.12) || intended < 0.75;
+  const stopped = Math.hypot(f.vx, f.vy) === 0;
+  if (arrived || stopped || f.ticks > 240) {
     if (f.kind === 'shot') { resolveShotArrival(state, f); return; }
     resolvePassArrival(state, f);
   }
 }
-
 function resolvePassArrival(state, f) {
   const side = state.possession;
   const xi = side === 'home' ? state.homeXI : state.awayXI;
@@ -364,58 +498,53 @@ function resolveShotArrival(state, f) {
   const defXI = side === 'home' ? state.awayXI : state.homeXI;
   const attacker = xi.find(p => p.id === f.fromId);
   const gk = defXI.find(p => p.pos === 'GK');
-  const nearest = outfield(defXI).map(p=>({p,d:distance(p,attacker)})).sort((a,b)=>a.d-b.d).slice(0,3);
-  const pressure = nearest.reduce((s,o)=>s+clamp(18-o.d,0,18),0)/Math.max(1,nearest.length);
-  const xDist = side==='home' ? 100-attacker.x : attacker.x;
-  const tactics = side==='home' ? state.homeTactics : state.awayTactics;
+  const defenders = outfield(defXI);
+  const shot = f.meta?.shot || {};
+  const quality = calculateShotQuality({ shooter: attacker, side, defenders, shotType: f.meta?.shotType || 'standard' });
+  const travelSeconds = Math.max(FIXED_DT_MS / 1000, f.ticks * FIXED_DT_MS / 1000);
 
-  const onTargetChance = clamp(
-    16 + effAttr(attacker,'technique')*.26 + effAttr(attacker,'composure')*.15 +
-    (100-clamp(xDist,0,100))*.20 - pressure*.85 + (MENTALITY_ATTACK[tactics?.mentality]||0),
-    8, 72
-  );
-  const onTarget = Math.random()*100 < onTargetChance;
   state.stats[side].shots++;
-  attacker.shots=(attacker.shots||0)+1;
-  attacker.touches=(attacker.touches||0)+1;
+  attacker.shots = (attacker.shots || 0) + 1;
+  attacker.touches = (attacker.touches || 0) + 1;
+  state.stats[side].xG = (state.stats[side].xG || 0) + quality.xg;
   state.ballInFlight = null;
 
-  if (!onTarget) {
-    state.stats[side].xG = (state.stats[side].xG||0) + (onTargetChance/100)*0.15;
-    log(state, `${attacker.name}'s effort goes wide of the post.`, 'chance', side);
-    state.possession = side==='home'?'away':'home';
-    resetForRestart(state, side==='home'?96:4, 50);
+  // If the simulated ball reaches the goal line outside the frame, it is a miss.
+  const goalYMin = GOAL_CENTER_Y - GOAL_HALF_WIDTH;
+  const goalYMax = GOAL_CENTER_Y + GOAL_HALF_WIDTH;
+  const finalY = Number(f.toY ?? f.meta?.shot?.actualTarget?.y ?? state.ballY);
+  if (finalY < goalYMin || finalY > goalYMax) {
+    log(state, `${attacker.name}'s effort misses the target.`, 'chance', side);
+    state.possession = side === 'home' ? 'away' : 'home';
+    resetForRestart(state, side === 'home' ? 96 : 4, 50);
     return;
   }
 
-  const placement = Math.random()*GOAL_HALF_WIDTH;
-  const gkQuality = gk ? (effAttr(gk,'positioning')*.3+effAttr(gk,'anticipation')*.3+effAttr(gk,'composure')*.2+effAttr(gk,'decisions')*.2) : 50;
-  const saveChance = clamp(gkQuality*1.5 - placement*7 - (effAttr(attacker,'finishing')-60)*.25, 15, 88);
-  const xg = clamp((onTargetChance/100) * (1-saveChance/100) * 1.3, 0.02, 0.75);
-  state.stats[side].xG = (state.stats[side].xG||0) + xg;
-  state.stats[side].onTarget++;
-
-  if (Math.random()*100 < saveChance) {
-    log(state, `${attacker.name} gets the shot away, but the goalkeeper saves it!`, 'chance', side);
-    if (Math.random()<0.3) {
+  const gkResult = resolveGoalkeeper({ goalkeeper: gk, shooter: attacker, side, shot: f.meta?.shot || {}, ballTravelSeconds: travelSeconds });
+  if (gkResult.save) {
+    state.stats[side].onTarget++;
+    const outcome = gkResult.outcome === 'parry' ? 'parries' : 'saves';
+    log(state, `${attacker.name}'s shot is ${outcome} by the goalkeeper.`, 'chance', side);
+    if (gkResult.outcome === 'parry' && Math.random() < 0.32) {
       state.stats[side].corners++;
-      log(state, `Saved behind — corner for ${side==='home'?state.homeName:state.awayName}.`, 'setpiece', side);
+      log(state, `The parried shot goes behind — corner for ${side === 'home' ? state.homeName : state.awayName}.`, 'setpiece', side);
       state.possession = side;
-      resetForRestart(state, side==='home'?98:2, Math.random()<0.5?2:98);
+      resetForRestart(state, side === 'home' ? 98 : 2, Math.random() < 0.5 ? 2 : 98);
     } else {
-      state.possession = side==='home'?'away':'home';
-      resetForRestart(state, side==='home'?92:8, 50);
+      state.possession = side === 'home' ? 'away' : 'home';
+      resetForRestart(state, side === 'home' ? 92 : 8, 50);
     }
     return;
   }
 
+  state.stats[side].onTarget++;
   state.score[side]++;
-  attacker.goals=(attacker.goals||0)+1;
-  const assister = state.lastPasser && state.lastPasser.id!==attacker.id ? state.lastPasser : null;
-  if (assister) assister.assists=(assister.assists||0)+1;
+  attacker.goals = (attacker.goals || 0) + 1;
+  const assister = state.lastPasser && state.lastPasser.id !== attacker.id ? state.lastPasser : null;
+  if (assister) assister.assists = (assister.assists || 0) + 1;
   state.lastPasser = null;
   log(state, `${attacker.name} finds the finish... GOAL!`, 'goal', side);
-  state.possession = side==='home' ? 'away' : 'home';
+  state.possession = side === 'home' ? 'away' : 'home';
   resetForRestart(state, 50, 50);
 }
 
@@ -523,16 +652,26 @@ function carrierStep(state) {
 
   if (inFinalThird && (state.possessionChain||0)>=2 && shootingUtility>60 && shootingUtility>passThreshold+8) {
     carrier.action='shoot';
+    const shotType = effAttr(carrier, 'technique') > 82 && Math.random() < 0.24 ? 'finesse' : 'standard';
+    const shot = executeShot({ shooter: carrier, side, defenders: outfield(defXI), goalkeeper: defXI.find(p => p.pos === 'GK'), shotType });
     log(state, `${carrier.name} shapes to shoot.`, 'play', side);
-    launchBall(state, carrier, xGoal, clamp(carrier.y+(Math.random()-0.5)*6,10,90), 'shot');
+    launchBall(state, carrier, shot.actualTarget.x, shot.actualTarget.y, 'shot', { shot, shotType, power: shot.power, elevation: shot.elevation, curl: shot.curl, curlSign: shot.curlSign });
     return;
   }
 
   if (bestReceiver && passThreshold>40) {
     const through = Math.abs((side==='home'?bestReceiver.x-carrier.x:carrier.x-bestReceiver.x))>8 && Math.random()<0.3;
-    const successChance = clamp(60 + effAttr(carrier,'passing')*.3 - pressure*.7 - distance(carrier,bestReceiver)*.15, 35, 94);
+    const passType = through ? 'through-pass' : 'pass';
+    const pass = executePass({ passer: carrier, receiver: bestReceiver, defenders: outfield(defXI), passType });
+    // Retain a small compatibility probability for the match statistics, but
+    // let actual trajectory/error/interception determine what happens in flight.
+    const successChance = clamp(55 + pass.selectionQuality*30 - pass.pressure*18 - pass.distance*0.25, 28, 96);
     log(state, `${carrier.name} looks to find ${bestReceiver.name}.`, 'play', side);
-    launchBall(state, carrier, bestReceiver.x, bestReceiver.y, through?'through-pass':'pass', { receiverId: bestReceiver.id, fromName: carrier.name, successChance });
+    launchBall(state, carrier, pass.actualTarget.x, pass.actualTarget.y, passType, {
+      receiverId: bestReceiver.id, fromName: carrier.name, successChance,
+      vx: pass.vx, vy: pass.vy, curl: pass.curl, curlSign: pass.curlSign, curlDecay: pass.curlDecay,
+      passAccuracy: pass.sigma, intendedTarget: pass.target, actualTarget: pass.actualTarget,
+    });
     return;
   }
 
@@ -578,6 +717,8 @@ export function initMatch({ homeXI, awayXI, homeName, awayName, homeTactics, awa
   const state = {
     minute:0, second:0, possession:'home', phase:'build-up', tick:0,
     ballX:50, ballY:50, ballInFlight:null,
+    pitchCondition: 'normal',
+    ballRetention: getBallRetention({ pitchCondition: 'normal' }),
     ballOwnerId: outfield(homeXI)[Math.floor(outfield(homeXI).length/2)]?.id ?? homeXI[0]?.id,
     dribbleTicksLeft:3, dribbleTargetSet:false,
     score:{home:0,away:0}, homeName, awayName,
