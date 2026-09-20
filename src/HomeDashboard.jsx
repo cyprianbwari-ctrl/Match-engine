@@ -3,7 +3,7 @@ import {
   Trophy, CalendarDays, Users, ChevronRight, Crosshair, Dumbbell, Play,
   Cloud, Smile, Heart, Gauge, ShieldAlert, Ban, Eye, RotateCcw, Bot,
   Wrench, Binoculars, UserRound, ArrowLeftRight, Target, Clock3, CheckCircle2,
-  Newspaper, Mail, Coins, Landmark
+  Newspaper, Mail, Coins, Landmark, Globe2
 } from 'lucide-react';
 import './home.css';
 import { useCompetitionData } from './store/CompetitionContext.jsx';
@@ -11,9 +11,13 @@ import { useCommunicationData } from './store/CommunicationContext.jsx';
 import { useStaffData } from './store/StaffContext.jsx';
 import { useClubData } from './store/ClubContext.jsx';
 import { useWorldData } from './store/WorldContext.jsx';
-import { players as roster } from './data/roster.js';
+import { useDatabase } from './store/DatabaseContext.jsx';
 import { mapRosterPlayer, todaysSchedule, matchPreparation, squadSnapshot, quickSimOptions } from './data/homeData.js';
 import { stadium, financesSummary } from './data/clubData.js';
+import { useSimulation } from './store/SimulationContext.jsx';
+import { useTransfersData } from './store/TransfersContext.jsx';
+import { useAIManagers } from './store/AIManagersContext.jsx';
+import { useFinanceData } from './store/FinanceContext.jsx';
 
 function Crest({ name, size = 34 }) {
   const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -38,8 +42,10 @@ const SCHEDULE_ICON = { training: Dumbbell, meeting: Users, prep: Crosshair, mat
 
 function NextMatchCard({ goTo }) {
   const { league } = useCompetitionData();
+  const { careerClub, stadiums } = useDatabase();
   const fixture = league.fixtures[0];
-  const us = league.table.find(r => r.us);
+  const venue = stadiums.find(s => String(s.stadiumId ?? s.id) === String(careerClub?.stadiumId)) || null;
+  const us = league.table.find(r => r.us) || league.table[0] || { pos: 1 };
   const opp = league.table.find(r => r.club === fixture.away) || league.table.find(r => r.club === fixture.home);
   const ord = (n) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
 
@@ -54,7 +60,7 @@ function NextMatchCard({ goTo }) {
         </div>
       </div>
       <div className="nm-info">
-        <div className="nm-info-row"><Landmark size={15} /><div><b>{stadium.name}</b><span>Capacity: {stadium.capacity.toLocaleString()}</span></div></div>
+        <div className="nm-info-row"><Landmark size={15} /><div><b>{venue?.name || careerClub?.name || 'Home Stadium'}</b><span>Capacity: {Number(venue?.capacity || 0).toLocaleString() || '—'}</span></div></div>
         <div className="nm-info-row"><CalendarDays size={15} /><div><b>{fixture.date}</b><span>{fixture.time}</span></div></div>
       </div>
       <div className="nm-prep">
@@ -71,11 +77,16 @@ function NextMatchCard({ goTo }) {
 }
 
 function TodaysScheduleCard({ goTo }) {
+  const { league } = useCompetitionData();
+  const fixture = league.fixtures[0];
   const routeFor = { training: 'Training', meeting: 'Communications', prep: 'Tactics', match: 'Match' };
+  const schedule = todaysSchedule.map(item => item.kind === 'match' && fixture
+    ? { ...item, title: `${fixture.home} vs ${fixture.away}`, sub: league.name }
+    : item);
   return <section className="home-card">
     <div className="home-card-head"><CalendarDays size={16} color="#4d9dff" /><h3>Today's Schedule</h3><button className="link-btn" onClick={() => goTo('Communications')}>View Calendar</button></div>
     <div className="panel-label">Sat, 14 Dec 2025</div>
-    {todaysSchedule.map((s, i) => {
+    {schedule.map((s, i) => {
       const Icon = SCHEDULE_ICON[s.kind] || Clock3;
       return <button className="sched-row" key={i} onClick={() => goTo(routeFor[s.kind])}>
         <span className="sched-icon"><Icon size={15} /></span>
@@ -89,11 +100,21 @@ function TodaysScheduleCard({ goTo }) {
 
 function SquadSnapshotCard({ goTo }) {
   const { openProfileFor } = useWorldData();
+  const { careerSquad: roster } = useDatabase();
   const openPlayer = (rosterId) => {
     const rp = roster.find(r => r.id === rosterId);
     if (rp) openProfileFor(mapRosterPlayer(rp), 'Home');
   };
-  const s = squadSnapshot;
+  const unavailable = roster.filter(p => p.availability && p.availability !== 'Available');
+  const s = {
+    morale: 82,
+    fitness: roster.length ? Math.round(roster.reduce((total, p) => total + (Number(p.fit) || 80), 0) / roster.length) : 0,
+    formRating: 7.5,
+    injuries: unavailable.filter(p => p.availability === 'Injured').map(p => ({ name: p.name, detail: p.availability, rosterId: p.id })),
+    suspensions: unavailable.filter(p => p.availability === 'Suspended').map(p => ({ name: p.name, detail: p.availability, rosterId: p.id })),
+    watchlist: roster.slice(0, 2).map(p => ({ name: p.name, detail: 'Available for selection', rosterId: p.id })),
+    returning: [],
+  };
   return <section className="home-card">
     <div className="home-card-head"><Users size={16} color="#3ddc84" /><h3>Squad Snapshot</h3><button className="link-btn" onClick={() => goTo('Squad')}>View Squad</button></div>
     <div className="snapshot-rings">
@@ -110,30 +131,54 @@ function SquadSnapshotCard({ goTo }) {
 
 function ClubStatusCard({ goTo }) {
   const { league, activeCompetitions } = useCompetitionData();
-  const us = league.table.find(r => r.us);
+  const { budgets, financialStatus } = useFinanceData();
+  const us = league.table.find(r => r.us) || league.table[0] || { pos: 1 };
   const ord = (n) => n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`;
   return <section className="home-card">
     <div className="home-card-head"><Trophy size={16} color="#ffd76b" /><h3>Club Status</h3><button className="link-btn" onClick={() => goTo('Club Dashboard')}>View Club</button></div>
-    <button className="cs-league-row" onClick={() => goTo('Competitions')}><b>{ord(us.pos)}</b><span>Premier League</span><ChevronRight size={14} /></button>
+    <button className="cs-league-row" onClick={() => goTo('Competitions')}><b>{ord(us.pos)}</b><span>{league.name}</span><ChevronRight size={14} /></button>
     <div className="panel-label">Current Competitions</div>
     {activeCompetitions.map(c => <button className="cs-comp-row" key={c.name} onClick={() => goTo('Competitions')}><span>{c.name}</span><b>{c.status}</b></button>)}
     <div className="panel-label">Finances</div>
-    <button className="cs-fin-row" onClick={() => goTo('Finance')}><span>Transfer Budget</span><b>{financesSummary.transferBudget}</b></button>
-    <button className="cs-fin-row" onClick={() => goTo('Finance')}><span>Wage Budget</span><b>{financesSummary.weeklyWageBudget}</b></button>
-    <button className="cs-fin-row" onClick={() => goTo('Finance')}><span>Club Finances</span><b className="good">{financesSummary.wageStructure}</b></button>
+    <button className="cs-fin-row" onClick={() => goTo('Finance')}><span>Transfer Budget</span><b>£{Math.round(budgets.available || 0).toLocaleString()}</b></button>
+    <button className="cs-fin-row" onClick={() => goTo('Finance')}><span>Wage Budget</span><b>£{Math.round(budgets.wagesWeekly || 0).toLocaleString()}</b></button>
+    <button className="cs-fin-row" onClick={() => goTo('Finance')}><span>Club Finances</span><b className="good">{financialStatus}</b></button>
     <div className="cs-fin-row"><span>Board Confidence</span><b className="good">High</b></div>
     <div className="cs-fin-row"><span>Squad Morale</span><b className="good">Good</b></div>
   </section>;
 }
 
+
+function ManagerCommandCentre({ goTo }) {
+  const sim = useSimulation();
+  const transfers = useTransfersData();
+  const ai = useAIManagers();
+  const pending = transfers.incomingOffers.filter(o => o.status === 'Pending').length;
+  const negotiations = transfers.negotiations.filter(n => !['Completed','Withdrawn','Rejected'].includes(n.status)).length;
+  return <section className="home-card command-centre">
+    <div className="home-card-head"><Bot size={16} color="#b06bff" /><h3>Manager Command Centre</h3><span className="comp-pill">LIVE WORLD</span></div>
+    <div className="command-grid">
+      <button onClick={() => goTo('Squad')}><Users size={15}/><span>Squad</span><b>Review</b></button>
+      <button onClick={() => goTo('Training')}><Dumbbell size={15}/><span>Training</span><b>Ready</b></button>
+      <button onClick={() => goTo('Scouting')}><Binoculars size={15}/><span>Scouting</span><b>{transfers.targetIds.length} targets</b></button>
+      <button onClick={() => goTo('Transfers')}><ArrowLeftRight size={15}/><span>Transfers</span><b>{negotiations} active</b></button>
+      <button onClick={() => goTo('Communications')}><Mail size={15}/><span>Inbox</span><b>{pending} decisions</b></button>
+      <button onClick={() => goTo('Competitions')}><Trophy size={15}/><span>League</span><b>{sim.daysUntilMatch === 0 ? 'Matchday' : `${sim.daysUntilMatch} days`}</b></button>
+    </div>
+    <div className="command-world"><span><Globe2 size={13}/>World activity</span><b>{ai.managers.length} AI managers active</b><small>{sim.worldPulse?.[0]?.text || 'Rival clubs continue to make decisions in the background.'}</small></div>
+  </section>;
+}
+
 function RecentResultsFormCard({ goTo }) {
   const { league, form } = useCompetitionData();
+  const { careerClub } = useDatabase();
+  const clubName = careerClub?.name || 'Current Club';
   return <section className="home-card">
     <div className="home-card-head"><Trophy size={16} color="#4da6ff" /><h3>Recent Results & Form</h3><button className="link-btn" onClick={() => goTo('Competitions')}>View All</button></div>
     <div className="rr-body">
       <div className="rr-list">
         {league.results.map((r, i) => {
-          const usHome = r.home === 'Man Utd';
+          const usHome = r.home === clubName;
           const [hs, as] = r.score.split(' - ').map(Number);
           const res = hs === as ? 'D' : (usHome ? hs > as : as > hs) ? 'W' : 'L';
           return <div className="rr-row" key={i}>
@@ -148,7 +193,7 @@ function RecentResultsFormCard({ goTo }) {
         <div className="panel-label">Form</div>
         <div className="form-row">{form.map((r, i) => <ResBadge r={r} key={i} />)}</div>
         <div className="panel-label" style={{ marginTop: 10 }}>Next 3 Fixtures</div>
-        {league.fixtures.slice(0, 3).map((f, i) => <div className="rr-fixture-row" key={i}><Crest name={f.home === 'Man Utd' ? f.away : f.home} size={20} /><span>{f.home === 'Man Utd' ? f.away : f.home}</span><small>{f.date}</small></div>)}
+        {league.fixtures.slice(0, 3).map((f, i) => <div className="rr-fixture-row" key={i}><Crest name={f.home === clubName ? f.away : f.home} size={20} /><span>{f.home === clubName ? f.away : f.home}</span><small>{f.date}</small></div>)}
       </div>
     </div>
   </section>;
@@ -207,26 +252,44 @@ function AssistantManagerCard({ goTo }) {
 function QuickSimulationCard() {
   const [sel, setSel] = useState('day');
   const [toast, setToast] = useState('');
+  const sim = useSimulation();
+  const comms = useCommunicationData();
   return <section className="home-card side-card">
     <div className="home-card-head"><Clock3 size={17} color="#68ff2e" /><h3>Quick Simulation</h3></div>
     {quickSimOptions.map(o => <button key={o.key} className={`sim-row ${sel === o.key ? 'active' : ''}`} onClick={() => setSel(o.key)}>{o.label}</button>)}
-    <button className="sim-continue" onClick={() => setToast(`Simulation engine coming soon — would run: ${quickSimOptions.find(o => o.key === sel).label}`)}><Play size={15} fill="currentColor" />Continue</button>
+    <button className="sim-continue" onClick={() => { sim.continueGame(comms); setToast(`Processing ${quickSimOptions.find(o => o.key === sel).label}...`); setTimeout(() => setToast(''), 1400); }}><Play size={15} fill="currentColor" />Continue</button>
     {toast && <div className="comm-toast">{toast}</div>}
   </section>;
 }
 
 // ================= ROOT =================
 
+function SeasonEndBanner({ goTo }) {
+  const { seasonComplete, seasonOutcome, advanceSeason, league } = useCompetitionData();
+  if (!seasonComplete || !seasonOutcome) return null;
+  const tone = seasonOutcome.outcome === 'promoted' ? 'good' : seasonOutcome.outcome === 'relegated' ? 'bad' : 'neutral';
+  return <div className={`season-end-banner ${tone}`}>
+    <div>
+      <b>Season complete — {league.name}</b>
+      <span>{seasonOutcome.label}</span>
+    </div>
+    <button onClick={() => advanceSeason()}>Start Next Season</button>
+  </div>;
+}
+
 export default function HomeDashboard({ setActive }) {
+  const { careerSquad: roster } = useDatabase();
   const goTo = (screen) => setActive && setActive(screen);
   return <div className="home-page">
     <div className="home-main">
+      <SeasonEndBanner goTo={goTo} />
       <NextMatchCard goTo={goTo} />
       <div className="home-row-3">
         <TodaysScheduleCard goTo={goTo} />
         <SquadSnapshotCard goTo={goTo} />
         <ClubStatusCard goTo={goTo} />
       </div>
+      <ManagerCommandCentre goTo={goTo} />
       <div className="home-row-2">
         <RecentResultsFormCard goTo={goTo} />
         <WorldNewsCard goTo={goTo} />

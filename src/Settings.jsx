@@ -4,11 +4,18 @@ import './settings.css';
 import { useSaveData } from './store/SaveContext.jsx';
 import { useSimulation } from './store/SimulationContext.jsx';
 import { useManagerData } from './store/ManagerContext.jsx';
+import { useGameIntegration } from './store/GameIntegrationContext.jsx';
+import { useDatabase } from './store/DatabaseContext.jsx';
 
 export default function SettingsScreen({ setActive }) {
   const save = useSaveData();
   const sim = useSimulation();
   const manager = useManagerData();
+  const integration = useGameIntegration();
+  const [editingManager, setEditingManager] = useState(false);
+  const [managerName, setManagerName] = useState(manager.profile.name);
+  const [managerStyle, setManagerStyle] = useState(manager.profile.coachingStyle);
+  const [managerTactic, setManagerTactic] = useState(manager.profile.tacticalStyle);
   const [slots, setSlots] = useState(save.getSlots());
   const [confirmSlot, setConfirmSlot] = useState(null);
   const [flash, setFlash] = useState('');
@@ -21,8 +28,8 @@ export default function SettingsScreen({ setActive }) {
     setFlash(`Saved to Slot ${idx + 1}`);
     setTimeout(() => setFlash(''), 2000);
   };
-  const doLoad = (idx) => {
-    if (save.loadFromSlot(idx)) {
+  const doLoad = async (idx) => {
+    if (await save.loadFromSlot(idx)) {
       setFlash(`Loaded Slot ${idx + 1}`);
       setTimeout(() => setFlash(''), 2000);
     }
@@ -71,6 +78,15 @@ export default function SettingsScreen({ setActive }) {
 
     <section className="settings-panel">
       <h3><ShieldCheck size={16} /> Manager Profile</h3>
+      <div className="manager-edit-row">
+        <button className="manager-edit-toggle" onClick={() => setEditingManager(v => !v)}>{editingManager ? 'Close Editor' : 'Edit Manager'}</button>
+        {editingManager && <>
+          <input value={managerName} onChange={e => setManagerName(e.target.value)} placeholder="Manager name" />
+          <input value={managerStyle} onChange={e => setManagerStyle(e.target.value)} placeholder="Coaching style" />
+          <input value={managerTactic} onChange={e => setManagerTactic(e.target.value)} placeholder="Tactical style" />
+          <button className="manager-save-btn" onClick={() => { manager.updateProfile({name:managerName.trim()||manager.profile.name,coachingStyle:managerStyle,tacticalStyle:managerTactic}); setEditingManager(false); }}>Apply</button>
+        </>}
+      </div>
       <div className="mgr-head">
         <div className="mgr-avatar">{manager.profile.name.split(' ').map(w => w[0]).join('').slice(0, 2)}</div>
         <div className="mgr-id">
@@ -100,6 +116,14 @@ export default function SettingsScreen({ setActive }) {
           {manager.profile.achievements.length === 0 && <p className="muted-sub">No trophies yet at {manager.profile.currentClub} — start building your legacy.</p>}
         </div>
       </div>
+    </section>
+
+    <section className="settings-panel integration-panel">
+      <h3><ShieldCheck size={16} /> Connected Game Systems</h3>
+      <div className="integration-grid">
+        {Object.entries(integration.integrity).map(([key,ok]) => <div key={key} className={ok ? 'integration-ok' : 'integration-off'}><i /> <span>{key.replace(/([A-Z])/g,' $1')}</span><b>{ok ? 'CONNECTED' : 'CHECK'}</b></div>)}
+      </div>
+      <p className="muted-sub">{integration.connectedSystems}/{integration.totalSystems} core systems are connected to the shared career state. The latest cross-system event is {integration.lastEvent?.label || 'waiting for activity'}.</p>
     </section>
 
     <section className="settings-panel">

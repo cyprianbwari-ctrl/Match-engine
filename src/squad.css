@@ -203,3 +203,7 @@
 @media(max-width:700px){
  .action-bar{grid-template-columns:1fr 1fr}
 }
+
+/* #14 Squad command strip */
+.squad-command-strip{display:flex;align-items:center;gap:7px;margin:8px 0 10px;overflow:auto}
+.squad-command-strip>span{white-space:nowrap;background:#0b112b;border:1px solid #232e55;border-radius:7px;padding:7px 9px;color:#7f8bad;font-size:9px}.squad-command-strip>span b{color:#eef3ff;font-size:11px;margin-right:3px}.squad-command-strip button{margin-left:auto;display:flex;align-items:center;gap:5px;white-space:nowrap;background:#541dbb;border:0;border-radius:7px;color:#fff;padding:8px 11px;font-size:9px;font-weight:800;cursor:pointer}

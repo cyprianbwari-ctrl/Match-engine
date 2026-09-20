@@ -1,6 +1,6 @@
 // FAMILY 26 formation library.
 // Each formation is a flat list of slots: {code, x, y, label}
-// code   -> tactical position code used for role lookup (see data/roster.js)
+// code   -> tactical position code used for role lookup (see data/tacticalDefinitions.js)
 // x,y    -> percentage position on the pitch
 // label  -> human-readable slot label shown in the UI
 

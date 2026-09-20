@@ -1,14 +1,26 @@
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import { useCompetitionData } from './CompetitionContext.jsx';
+import { computeBoardExpectation } from '../engine/careerClub.js';
 
 const ClubStateCtx = createContext(null);
 
 export function ClubStateProvider({ children }) {
+  const { league, divisionLevel } = useCompetitionData();
   const [boardConfidence, setBoardConfidence] = useState(72);
-  const [clubReputation, setClubReputation] = useState(84); // slow-moving, world-class baseline for Man Utd
-  const [seasonExpectation] = useState({ label: 'Top 4 finish & a domestic cup run', minPosition: 4 });
+  const [clubReputation, setClubReputation] = useState(84); // slow-moving baseline, adjusted by results over time
   const [clubHistory, setClubHistory] = useState([
-    { date: 'Season Start', event: 'Season Underway', detail: 'Board expects a top-4 finish and progress in the cups.' },
+    { date: 'Season Start', event: 'Season Underway', detail: 'A new season begins.' },
   ]);
+
+  // Live, division-aware target instead of a fixed "top-4 finish" assumption
+  // that made no sense outside the top flight — recalculates as the table
+  // (and the club's actual position in it) changes through the season.
+  const seasonExpectation = useMemo(() => {
+    const table = league?.table || [];
+    const rank = table.findIndex(r => r.us) + 1;
+    const { label, minPosition } = computeBoardExpectation(rank || 1, table.length || 20, divisionLevel);
+    return { label, minPosition };
+  }, [league, divisionLevel]);
 
   const adjustBoardConfidence = useCallback((delta, reason) => {
     setBoardConfidence(c => {

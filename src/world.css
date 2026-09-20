@@ -235,3 +235,6 @@
 .int-lvl.medium{background:#f2c94c33;color:#f2c94c}
 .int-lvl.low{background:#4fa8f533;color:#7fc4ff}
 @media(max-width:900px){.pp-body-grid{grid-template-columns:1fr}.pp-overview-grid{grid-template-columns:1fr}.wp-modal-backdrop{left:0}}
+
+.pp-morale-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:8px}.pp-morale-grid div{background:#0b112b;border:1px solid #252f57;border-radius:5px;padding:6px;text-align:center}.pp-morale-grid span{display:block;color:#7f8bad;font-size:8px}.pp-morale-grid b{display:block;color:#edf2ff;font-size:12px;margin-top:3px}
+.pp-morale-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:8px}.pp-morale-grid div{background:#0b112b;border:1px solid #252f57;border-radius:5px;padding:6px;text-align:center}.pp-morale-grid span{display:block;color:#7f8bad;font-size:8px}.pp-morale-grid b{display:block;color:#edf2ff;font-size:12px;margin-top:3px}

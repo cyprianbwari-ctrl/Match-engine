@@ -32,23 +32,23 @@ function mk(id, name, dept, category, nat, age, contract, rating, color, extra =
   const base = Math.round(rating * 20);
   return {
     id, name, dept, category, role: category, title: category, nat, age, contract, rating, color,
-    club: 'Manchester United', status: 'Active', wage: 900 + base * 90 + (id % 5) * 200,
+    club: 'Newcastle United', status: 'Active', wage: 900 + base * 90 + (id % 5) * 200,
     workload: 30 + ((id * 17) % 60), attributes: attrSet(keys, base), assignment: null,
     ...extra
   };
 }
 
 export const initialStaff = [
-  mk(1, 'Rúben Amorim', 'Coaching', 'Manager', '🇵🇹', 39, '30 Jun 2027', 4.5, 'purple', { formation: '4-2-3-1', style: 'Attacking', bio: 'Rúben Amorim is a highly regarded manager known for his tactical intelligence and player development.' }),
-  mk(2, 'Pep Guardiola', 'Coaching', 'Assistant Manager', '🇪🇸', 53, '30 Jun 2026', 4.5, 'blue'),
-  mk(3, 'Rui Faria', 'Coaching', 'Coaches', '🇵🇹', 45, '30 Jun 2026', 4.0, 'green'),
-  mk(4, 'Carlos Queiroz', 'Coaching', 'Goalkeeping Coaches', '🇮🇷', 72, '30 Jun 2026', 3.5, 'cyan'),
+  mk(1, 'Tomás Redondo', 'Coaching', 'Manager', '🇵🇹', 39, '30 Jun 2027', 4.5, 'purple', { formation: '4-2-3-1', style: 'Attacking', bio: 'Tomás Redondo is a highly regarded coach known for his tactical intelligence and player development.' }),
+  mk(2, 'Marco Ibáñez', 'Coaching', 'Assistant Manager', '🇪🇸', 53, '30 Jun 2026', 4.5, 'blue'),
+  mk(3, 'Rui Andrade', 'Coaching', 'Coaches', '🇵🇹', 45, '30 Jun 2026', 4.0, 'green'),
+  mk(4, 'Carlos Mendieta', 'Coaching', 'Goalkeeping Coaches', '🇮🇷', 72, '30 Jun 2026', 3.5, 'cyan'),
   mk(5, 'Jason Tindall', 'Coaching', 'Coaches', '🏴', 43, '30 Jun 2026', 3.0, 'blue'),
   mk(6, 'Chris Armas', 'Coaching', 'Coaches', '🇺🇸', 42, '30 Jun 2026', 3.5, 'orange'),
   mk(7, 'Iñaki Caña', 'Coaching', 'Fitness Coaches', '🇪🇸', 37, '30 Jun 2026', 3.5, 'purple'),
   mk(8, 'Frederic Hebert', 'Medical', 'Physiotherapists', '🇫🇷', 41, '30 Jun 2026', 3.0, 'pink'),
-  mk(9, 'Steve McClaren', 'Scouting', 'Scouts', '🏴', 63, '30 Jun 2026', 3.0, 'blue'),
-  mk(10, 'Javier Ribalta', 'Scouting', 'Chief Scout', '🇪🇸', 52, '30 Jun 2027', 3.5, 'blue'),
+  mk(9, 'Steve Callahan', 'Scouting', 'Scouts', '🏴', 63, '30 Jun 2026', 3.0, 'blue'),
+  mk(10, 'Javier Roldán', 'Scouting', 'Chief Scout', '🇪🇸', 52, '30 Jun 2027', 3.5, 'blue'),
   mk(11, 'Dr. James Wilson', 'Medical', 'Head Physio', '🏴', 48, '30 Jun 2027', 4.5, 'purple'),
   mk(12, 'Emma Clarke', 'Medical', 'Physiotherapists', '🏴', 34, '30 Jun 2026', 4.0, 'green'),
   mk(13, 'Daniel Roberts', 'Medical', 'Physiotherapists', '🇵🇹', 32, '30 Jun 2026', 4.0, 'green'),
@@ -57,11 +57,11 @@ export const initialStaff = [
   mk(16, "Karen O'Neill", 'Medical', 'Sports Scientists', '🇮🇪', 36, '30 Jun 2026', 3.5, 'pink'),
   mk(17, 'Markus Jensen', 'Medical', 'Rehabilitation Specialists', '🇩🇰', 39, '30 Jun 2026', 3.5, 'gold'),
   mk(18, 'Daniel Harris', 'Scouting', 'Chief Scout', '🏴', 54, '30 Jun 2027', 4.5, 'purple'),
-  mk(19, 'Marco Silva', 'Scouting', 'Scouts', '🇵🇹', 42, '30 Jun 2026', 4.0, 'green'),
+  mk(19, 'Mateo Rocha', 'Scouting', 'Scouts', '🇵🇹', 42, '30 Jun 2026', 4.0, 'green'),
   mk(20, 'Sophie Lambert', 'Scouting', 'Scouts', '🇫🇷', 38, '30 Jun 2026', 4.0, 'green'),
   mk(21, 'Carlos Mendes', 'Scouting', 'Scouts', '🇧🇷', 36, '30 Jun 2027', 4.0, 'green'),
   mk(22, 'Kenji Tanaka', 'Scouting', 'Scouts', '🇯🇵', 34, '30 Jun 2026', 4.0, 'green'),
-  mk(23, 'Rasmus Højlund', 'Scouting', 'Scouts', '🇩🇰', 32, '30 Jun 2026', 3.5, 'green'),
+  mk(23, 'Anders Krogh', 'Scouting', 'Scouts', '🇩🇰', 32, '30 Jun 2026', 3.5, 'green'),
   mk(24, 'Lukas Weber', 'Scouting', 'Scouts', '🇩🇪', 29, '30 Jun 2026', 3.5, 'green'),
   mk(25, 'Fatou Diop', 'Scouting', 'Scouts', '🇸🇳', 31, '30 Jun 2027', 3.5, 'green'),
   mk(26, 'Nuno Moreira', 'Coaching', 'Youth Coaches', '🇵🇹', 38, '30 Jun 2026', 4.0, 'cyan'),
@@ -114,6 +114,6 @@ export const initialScoutAssignments = [
 ];
 
 export const initialInbox = [
-  { id: 1, kind: 'contract', text: 'Pep Guardiola\'s contract expires in under 12 months — begin renewal talks?', status: 'pending' },
+  { id: 1, kind: 'contract', text: 'Marco Ibáñez\'s contract expires in under 12 months — begin renewal talks?', status: 'pending' },
   { id: 2, kind: 'vacancy', text: 'No Set-Piece Coach on staff. The board has approved a budget to hire one.', status: 'pending' },
 ];

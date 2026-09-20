@@ -36,8 +36,34 @@ import { SimulationProvider, useSimulation } from "./store/SimulationContext.jsx
 import { TransfersProvider } from "./store/TransfersContext.jsx";
 import { FinanceProvider } from "./store/FinanceContext.jsx";
 import { PlayerStateProvider } from "./store/PlayerStateContext.jsx";
-import { ManagerProvider } from "./store/ManagerContext.jsx";
+import { ManagerProvider, useManagerData } from "./store/ManagerContext.jsx";
 import { ClubStateProvider } from "./store/ClubStateContext.jsx";
+import { AIManagersProvider } from "./store/AIManagersContext.jsx";
+import { DatabaseProvider, useDatabase } from "./store/DatabaseContext.jsx";
+import { CareerRecordsProvider, useCareerRecords } from "./store/CareerRecordsContext.jsx";
+import { GameIntegrationProvider } from "./store/GameIntegrationContext.jsx";
+import OnboardingFlow from "./onboarding/OnboardingFlow.jsx";
+
+class AppErrorBoundary extends React.Component {
+  state = { error: null };
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return <div className="ob-screen" style={{ display: 'grid', placeItems: 'center', padding: 24 }}>
+        <div className="ob-confirm-card" style={{ maxWidth: 620 }}>
+          <h1 className="ob-h1">Unable to open career</h1>
+          <div className="ob-sub">{this.state.error.message || 'An unexpected error occurred.'}</div>
+          <button className="ob-btn-primary" style={{ marginTop: 20 }} onClick={() => window.location.reload()}>Reload Career</button>
+        </div>
+      </div>;
+    }
+    return this.props.children;
+  }
+}
 
 const nav = [
   ["Home",Home],["Squad",Users],["Tactics",Crosshair],["Training",Dumbbell],
@@ -55,9 +81,13 @@ function Header({ onMenuClick, onSearchClick, setActive }) {
   const save = useSaveData();
   const { league, simulateMatchday } = useCompetitionData();
   const { unreadCount, addMessage, addNews } = useCommunicationData();
+  const manager = useManagerData();
+  const { careerClub } = useDatabase();
 
   const fixture = league.fixtures[0];
-  const oppShort = fixture ? (fixture.home === 'Man Utd' ? fixture.away : fixture.home) : '—';
+  const clubName = careerClub?.name || manager.profile.currentClub || 'Current Club';
+  const clubLetters = (careerClub?.code || careerClub?.shortName || clubName).slice(0, 3).toUpperCase();
+  const oppShort = fixture ? (fixture.home === clubName ? fixture.away : fixture.home) : '—';
 
   const handleContinue = () => {
     if (sim.phase === 'matchday') { setActive('Matchday'); return; }
@@ -66,9 +96,9 @@ function Header({ onMenuClick, onSearchClick, setActive }) {
 
   return <header className="topbar">
     <button className="menu-btn" onClick={onMenuClick}><Menu size={26}/></button>
-    <button className="brand" onClick={()=>!sim.matchLocked && setActive('Home')} style={sim.matchLocked?{cursor:'default'}:undefined}><div><b>FAMILY<span>26</span></b><small>BIGGER STRONGER TOGETHER</small></div></button>
-    <div className="club-head"><Crest/><div><strong>Manchester United</strong><span>Manager: Cyprian</span></div></div>
-    <div className="competition-head"><Trophy size={21}/><div><strong>Premier League</strong><span>🏴 England</span></div></div>
+    <button className="brand" onClick={()=>!sim.matchLocked && setActive('Home')} style={sim.matchLocked?{cursor:'default'}:undefined}><div><b>FAMILY<span>26</span></b></div></button>
+    <div className="club-head"><Crest letters={clubLetters}/><div><strong>{clubName}</strong><span>Manager: {manager.profile.name}</span></div></div>
+    <div className="competition-head"><Trophy size={21}/><div><strong>{league.name || 'League'}</strong><span>{league.country || '—'}</span></div></div>
     <div className="header-spacer"/>
     <div className="date-block"><CalendarDays size={17}/><div>{sim.dateLabel}<span>{sim.timeLabel}</span></div></div>
     <div className="status-pill"><i className={sim.gameStatus.pulse ? 'pulse' : ''} style={{background:sim.gameStatus.color}}/><span style={{color:sim.gameStatus.color}}>{sim.matchLocked ? 'Match In Progress' : sim.gameStatus.label}</span></div>
@@ -88,7 +118,6 @@ function Sidebar({active,setActive,collapsed}) {
   const sim = useSimulation();
   return <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${sim.matchLocked ? 'sidebar-locked' : ''}`} inert={sim.matchLocked || undefined}>
     {nav.map(([label,Icon])=><button key={label} className={active===label?"active":""} onClick={()=>setActive(label)}><Icon size={21}/><span>{label}</span>{label==="Communications"&&unreadCount>0&&<em>{unreadCount}</em>}</button>)}
-    <div className="slogan">BIGGER<br/>STRONGER<br/><span>TOGETHER</span></div>
   </aside>
 }
 
@@ -114,13 +143,17 @@ function RecoveryPrompt() {
   </div>;
 }
 
+function CareerPulse(){ const {data}=useCareerRecords(); return <div className="career-pulse" aria-label="Career records"><span>W {data.records.wins}</span><span>G {data.records.goalsFor}</span><span>EV {data.events.length}</span></div> }
+
 function App() {
   const [active,setActive]=useState("Home");
   const [searchOpen,setSearchOpen]=useState(false);
   const [sidebarCollapsed,setSidebarCollapsed]=useState(false);
+  const [careerReady,setCareerReady]=useState(false);
   const navigateTo = (screen) => setActive(screen);
 
-  return <StaffProvider><CompetitionProvider><CommunicationProvider><WorldProvider><ClubProvider><ClubStateProvider><TrainingProvider><PlayerStateProvider><TacticsProvider><FinanceProvider><TransfersProvider><ManagerProvider><SimulationProvider onGoToMatch={()=>setActive('Match')}><SaveProvider><div className="app">
+  return <ManagerProvider><AppErrorBoundary><DatabaseProvider><StaffProvider><CompetitionProvider><CommunicationProvider><WorldProvider><ClubProvider><ClubStateProvider><PlayerStateProvider><TrainingProvider><TacticsProvider><FinanceProvider><TransfersProvider><AIManagersProvider><SimulationProvider onGoToMatch={()=>setActive('Match')}><CareerRecordsProvider><SaveProvider><GameIntegrationProvider>
+  {!careerReady ? <OnboardingFlow onReady={()=>setCareerReady(true)}/> : <div className="app"><CareerPulse/>
     <Header onMenuClick={()=>setSidebarCollapsed(c=>!c)} onSearchClick={()=>setSearchOpen(true)} setActive={setActive}/>
     <Sidebar active={active} setActive={setActive} collapsed={sidebarCollapsed}/>
     <MainArea>
@@ -158,6 +191,7 @@ function App() {
     <SimulationWindow goTo={setActive}/>
     <RecoveryPrompt/>
     <GlobalSearch open={searchOpen} onClose={()=>setSearchOpen(false)} navigateTo={navigateTo}/>
-  </div></SaveProvider></SimulationProvider></ManagerProvider></TransfersProvider></FinanceProvider></TacticsProvider></PlayerStateProvider></TrainingProvider></ClubStateProvider></ClubProvider></WorldProvider></CommunicationProvider></CompetitionProvider></StaffProvider>
+  </div>}
+  </GameIntegrationProvider></SaveProvider></CareerRecordsProvider></SimulationProvider></AIManagersProvider></TransfersProvider></FinanceProvider></TacticsProvider></TrainingProvider></PlayerStateProvider></ClubStateProvider></ClubProvider></WorldProvider></CommunicationProvider></CompetitionProvider></StaffProvider></DatabaseProvider></AppErrorBoundary></ManagerProvider>
 }
 createRoot(document.getElementById("root")).render(<App/>);

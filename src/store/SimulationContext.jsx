@@ -1,4 +1,10 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
+import { useAIManagers } from './AIManagersContext.jsx';
+import { useManagerData } from './ManagerContext.jsx';
+import { useTransfersData } from './TransfersContext.jsx';
+import { useWorldData } from './WorldContext.jsx';
+import { createSeededRng, pick, shuffle } from '../engine/seededRng.js';
+import { DEFAULT_CAREER_SEED, getDaySeed, normalizeCareerSeed } from '../engine/simulationSeeds.js';
 
 const SimCtx = createContext(null);
 
@@ -25,12 +31,18 @@ const OTHER_RESULTS_HEADLINES = [
 ];
 
 export function SimulationProvider({ children, onGoToMatch }) {
+  const ai = useAIManagers();
+  const transfers = useTransfersData();
+  const world = useWorldData();
+  const manager = useManagerData();
+  const careerSeed = normalizeCareerSeed(manager.profile?.careerSeed || DEFAULT_CAREER_SEED);
   const [now, setNow] = useState(() => { const d = new Date(2025, 8, 13, 15, 42); return d; }); // Sat 13 Sep 2025, arbitrary start
   const [daysUntilMatch, setDaysUntilMatch] = useState(1);
   const [phase, setPhase] = useState('upcoming'); // upcoming | matchday | finished
   const [liveMatch, setLiveMatch] = useState(null); // { inProgress, minute, second, homeScore, awayScore, opponent }
   const [lastSavedAt, setLastSavedAt] = useState(() => formatTime(new Date(2025, 8, 13, 15, 42)));
   const [processLog, setProcessLog] = useState([]);
+  const [worldPulse, setWorldPulse] = useState([]);
   const [simWindowOpen, setSimWindowOpen] = useState(false);
   const openSimWindow = useCallback(() => setSimWindowOpen(true), []);
   const closeSimWindow = useCallback(() => setSimWindowOpen(false), []);
@@ -47,13 +59,15 @@ export function SimulationProvider({ children, onGoToMatch }) {
   // match-related is happening, per the Continue -> process events -> stop
   // cycle.
   const processRoutineDay = useCallback((addMessage, addNews) => {
-    const picks = [...ROUTINE_EVENTS].sort(() => Math.random() - 0.5).slice(0, 1 + Math.floor(Math.random() * 2));
+    const daySeed = getDaySeed(careerSeed, Math.max(0, Math.floor((now.getTime() - new Date(2025, 8, 13).getTime()) / 86400000) + 1));
+    const rng = createSeededRng(daySeed);
+    const picks = shuffle(rng, ROUTINE_EVENTS).slice(0, 1 + Math.floor(rng() * 2));
     picks.forEach(p => addMessage(p));
-    if (Math.random() > 0.5) {
-      addNews({ category: 'Football News', bucket: 'Football News', crest: 'Fans', headline: OTHER_RESULTS_HEADLINES[Math.floor(Math.random() * OTHER_RESULTS_HEADLINES.length)], body: 'Elsewhere in the division, results continue to shape the table.' });
+    if (rng() > 0.5) {
+      addNews({ category: 'Football News', bucket: 'Football News', crest: 'Fans', headline: pick(rng, OTHER_RESULTS_HEADLINES), body: 'Elsewhere in the division, results continue to shape the table.' });
     }
     setProcessLog(picks.map(p => p.subject));
-  }, []);
+  }, [careerSeed, now]);
 
   // The Continue button's core behaviour: if today is match day, hand off
   // to the real Match Engine (Live) instead of skipping time; otherwise
@@ -64,11 +78,30 @@ export function SimulationProvider({ children, onGoToMatch }) {
       return;
     }
     advanceClockOneDay();
+    const dayIndex = Math.floor((now.getTime() - new Date(2025, 8, 13).getTime()) / 86400000) + 1;
+    ai.simulateDay({ dayIndex });
+    const worldEvents=world.simulateWorldDayStep(dayIndex) || [];
+    if(worldEvents.length){ setWorldPulse(prev => [...worldEvents.map(e=>({id:`${dayIndex}-${e.player}-${e.type}`,text:e.text,date:formatDate(new Date(now.getTime()+86400000))})), ...prev].slice(0,12)); }
+    // #12 World simulation: rival clubs and the market continue moving while
+    // the manager is away from those screens. Keep it deterministic enough to
+    // feel like a world, but sparse enough that news remains meaningful.
+    let pulse = [];
+    if (dayIndex % 2 === 0) {
+      const moved = transfers.simulateAITransferActivity();
+      if (moved) pulse.push(`${moved.name}: ${moved.from} → ${moved.to}`);
+    }
+    if (dayIndex % 3 === 0) {
+      const managers = ai.managers || [];
+      const m = managers[dayIndex % Math.max(1, managers.length)];
+      if (m) pulse.push(`${m.club}: ${m.name} reviews the squad and tactical plan`);
+    }
+    if (pulse.length) setWorldPulse(prev => [...pulse.map(text => ({ id: `${dayIndex}-${text}`, text, date: formatDate(new Date(now.getTime()+86400000)) })), ...prev].slice(0, 12));
     setLastSavedAt(formatTime(new Date()));
     processRoutineDay(addMessage, addNews);
     if (phase === 'finished') {
+      const dayRng = createSeededRng(getDaySeed(careerSeed, dayIndex));
       setPhase('upcoming');
-      setDaysUntilMatch(3 + Math.floor(Math.random() * 3));
+      setDaysUntilMatch(3 + Math.floor(dayRng() * 3));
       return;
     }
     setDaysUntilMatch(d => {
@@ -76,7 +109,7 @@ export function SimulationProvider({ children, onGoToMatch }) {
       if (nd <= 0) { setPhase('matchday'); return 0; }
       return nd;
     });
-  }, [phase, liveMatch, advanceClockOneDay, processRoutineDay, onGoToMatch]);
+  }, [phase, liveMatch, advanceClockOneDay, processRoutineDay, onGoToMatch, ai, world, now, careerSeed]);
 
   // Called by the Match screen when a match starts/ticks/finishes.
   const reportLiveMatch = useCallback((status) => {
@@ -98,11 +131,12 @@ export function SimulationProvider({ children, onGoToMatch }) {
   const value = {
     now, dateLabel: formatDate(now), timeLabel: formatTime(now), lastSavedAt,
     phase, daysUntilMatch, liveMatch, reportLiveMatch, gameStatus, nextLabel,
-    continueGame, processLog,
+    continueGame, processLog, worldPulse,
     simWindowOpen, openSimWindow, closeSimWindow,
     matchLocked, lockForMatch, unlockAfterMatch,
     advanceClockOneDay, setDaysUntilMatch, setPhase, setLastSavedAt,
-    getSnapshot: () => ({ now: now.toISOString(), daysUntilMatch, phase, lastSavedAt }),
+    aiManagers: ai.managers,
+    getSnapshot: () => ({ now: now.toISOString(), daysUntilMatch, phase, lastSavedAt, careerSeed }),
     restoreSnapshot: (s) => {
       if (!s) return;
       if (s.now) setNow(new Date(s.now));

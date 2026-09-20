@@ -8,3 +8,6 @@
 .assignment-row{display:grid;grid-template-columns:1.1fr 1.3fr 1.3fr .7fr .8fr;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid #1e274a;font-size:10px;color:#dfe6fb}
 .assignment-row select{background:#10163a;border:1px solid #303d70;border-radius:5px;color:#dfe5fa;font-size:9px;height:26px}
 @media(max-width:850px){.assignment-form,.assignment-head,.assignment-row{grid-template-columns:1fr 1fr;font-size:9px}}
+
+/* #16 Database-backed scouting */
+.scouting-page:after{content:'LIVE DATABASE SCOUTING';position:fixed;right:14px;bottom:10px;font-size:8px;letter-spacing:.8px;color:#5e6b8d;pointer-events:none}

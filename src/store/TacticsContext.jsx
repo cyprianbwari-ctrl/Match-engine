@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useMemo } from 'react';
-import { players as roster } from '../data/roster.js';
+import { useDatabase } from './DatabaseContext.jsx';
 import { FORMATIONS } from '../tactics/formations.js';
 import { autoAssign } from '../tactics/logic.js';
 
@@ -23,7 +23,7 @@ export function defaultPressing() {
 // Squad -> Tactics: pick the best available XI from real squad status
 // (availability / playing-time rank) rather than raw roster order.
 const PLAYTIME_RANK = { "Key Player": 0, "First Team": 1, "Squad Player": 2, "Rotation": 3, "Backup": 4, "Prospect": 5, "Third Choice": 5, "Youth": 6, "Emergency": 7 };
-export function pickStartXI() {
+export function pickStartXI(roster = []) {
   return [...roster]
     .filter(p => p.availability !== "Injured" && p.availability !== "Suspended")
     .sort((a, b) => (PLAYTIME_RANK[a.playTime] ?? 9) - (PLAYTIME_RANK[b.playTime] ?? 9) || b.ovr - a.ovr)
@@ -31,8 +31,9 @@ export function pickStartXI() {
 }
 
 export function TacticsProvider({ children }) {
+  const { careerSquad: roster } = useDatabase();
   const [formation, setFormation] = useState("4-2-3-1");
-  const [assignment, setAssignment] = useState(() => autoAssign(FORMATIONS["4-2-3-1"], pickStartXI()));
+  const [assignment, setAssignment] = useState(() => autoAssign(FORMATIONS["4-2-3-1"], pickStartXI(roster)));
   const [roleAssignment, setRoleAssignment] = useState({});
   const [dutyAssignment, setDutyAssignment] = useState({});
   const [playerInstructions, setPlayerInstructions] = useState({});
@@ -52,7 +53,7 @@ export function TacticsProvider({ children }) {
   const [setPieces, setSetPieces] = useState({ cornerTaker: null, cornerType: 'Near Post', freeKickTaker: null, freeKickType: 'Direct', penaltyTaker: null, backupPenaltyTaker: null, throwInStyle: 'Short', defensiveCorner: 'Zonal' });
   const [oppositionInstructions, setOppositionInstructions] = useState({});
 
-  const startXI = pickStartXI();
+  const startXI = pickStartXI(roster);
   const slots = FORMATIONS[formation];
 
   // The set of player ids currently holding a slot on the pitch — this is

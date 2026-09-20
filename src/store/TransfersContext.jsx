@@ -1,14 +1,20 @@
 import React, { createContext, useContext, useState, useMemo, useCallback } from 'react';
-import { players as worldPlayers } from '../data/worldData.js';
-import { players as roster } from '../data/roster.js';
+import { useWorldData } from './WorldContext.jsx';
 import { useFinanceData } from './FinanceContext.jsx';
+import { useDatabase } from './DatabaseContext.jsx';
+import { negotiate } from '../engine/transferMarketEngine.js';
+import { createSeededRng, deriveSeed } from '../engine/seededRng.js';
+import { getCareerSeed } from '../engine/careerSeedStore.js';
+import { getCareerClubName } from '../engine/clubIdentity.js';
+import { isLeagueActive, normalizeActiveLeagues } from '../engine/activeLeaguePolicy.js';
+import { useManagerData } from './ManagerContext.jsx';
 
 const TransfersCtx = createContext(null);
 
 // A handful of our own players are shown as available/listed in the market
-// too (Man Utd sell/loan players out, not just buy) — sourced straight from
+// too (Newcastle sell/loan players out, not just buy) — sourced straight from
 // the real squad roster so the numbers stay consistent with Squad/Tactics.
-const OWN_LISTED_IDS = [12, 10, 11]; // Bayındır, Garnacho, Højlund — squad depth pieces, not first-choice
+const OWN_LISTED_IDS = [12, 10, 11]; // Sancak, Villanueva, Krogh — squad depth pieces, not first-choice
 
 function moneyToNumber(v) {
   const n = Number(String(v).replace(/[^0-9.]/g, ''));
@@ -25,7 +31,8 @@ function formatEURShort(n) {
 // Deterministic pseudo-randomness so a given player's preference/interest
 // don't reshuffle every render.
 function seeded(id, salt = 0) {
-  const x = Math.sin(id * 999 + salt * 37.7) * 10000;
+  const n = typeof id === 'number' ? id : String(id ?? '').split('').reduce((a,c)=>a*31+c.charCodeAt(0),17);
+  const x = Math.sin(n * 999 + salt * 37.7) * 10000;
   return x - Math.floor(x);
 }
 
@@ -44,11 +51,18 @@ function loanEligibility(id) {
   return { unhappy, loanListedByClub };
 }
 
-const RIVAL_CLUBS = ['Chelsea', 'PSG', 'Bayern Munich', 'Real Madrid', 'Liverpool', 'Arsenal', 'Barcelona', 'Newcastle'];
+const LEAGUE_COUNTRY = {
+  'Premier League':'England','La Liga':'Spain','Bundesliga':'Germany','Serie A':'Italy','Ligue 1':'France',
+  'Primeira Liga':'Portugal','Eredivisie':'Netherlands','Belgian Pro League':'Belgium','Scottish Premiership':'Scotland',
+  'Süper Lig':'Turkey','Austrian Bundesliga':'Austria','Swiss Super League':'Switzerland'
+};
 
-function buildMarket() {
-  const external = worldPlayers
-    .filter(p => p.club !== 'Man Utd')
+const RIVAL_CLUBS = ['Chelsea', 'PSG', 'Bayern Munich', 'Real Madrid', 'Liverpool', 'Arsenal', 'Barcelona', 'Tottenham'];
+
+function buildMarket(players = [], roster = [], currentClubName = 'Unassigned Club', activeLeagues = []) {
+  const external = players
+    .filter(p => p.club !== currentClubName)
+    .filter(p => !p.league || !LEAGUE_COUNTRY[p.league] || activeLeagues.includes(LEAGUE_COUNTRY[p.league]))
     .map(p => {
       const value = moneyToNumber(p.value);
       const asking = Math.round(value * (1.08 + seeded(p.id) * 0.28));
@@ -70,7 +84,7 @@ function buildMarket() {
   const own = roster.filter(p => OWN_LISTED_IDS.includes(p.id)).map(p => {
     const value = (p.ovr - 40) * 1_500_000;
     return {
-      id: `own-${p.id}`, rosterId: p.id, name: p.name, nat: p.nat, club: 'Man Utd', league: 'Premier League',
+      id: `own-${p.id}`, rosterId: p.id, name: p.name, nat: p.nat, club: currentClubName, league: 'Premier League',
       pos: p.displayPos, age: p.age, ovr: p.ovr, pot: Math.min(96, p.ovr + 4), value,
       asking: Math.round(value * 1.15), preference: 100,
       contractExpiry: `30 Jun ${2026 + (p.id % 3)}`, status: 'Listed', interest: RIVAL_CLUBS.slice(0, 2).map((c,i)=>({club:c,level:i===0?'Medium':'Low'})),
@@ -83,15 +97,29 @@ function buildMarket() {
 }
 
 export function TransfersProvider({ children }) {
+  const manager = useManagerData();
+  const db = useDatabase();
+  const currentClubName = getCareerClubName(manager.profile, db);
+  const activeLeagues = normalizeActiveLeagues(manager.profile?.activeLeagues || []);
+  const { careerSquad: roster, worldPlayers } = db;
   const finance = useFinanceData();
-  const [market, setMarket] = useState(buildMarket);
-  const [budget, setBudget] = useState({ total: 120_000_000, available: 120_000_000, wageAvailable: 320_000 });
+  const [market, setMarket] = useState(() => buildMarket(db.players, roster, currentClubName, activeLeagues));
+  const budget = useMemo(() => {
+    const total = Number(finance.budgets.transfer || 0);
+    const spent = finance.transactions.filter(t => t.category === 'Transfers' && t.amount < 0).reduce((a,t) => a + Math.abs(t.amount), 0);
+    return { total, available: Math.max(0, total - spent), wageAvailable: Math.max(0, Number(finance.budgets.wagesWeekly || 0) - Number(finance.wageBill || 0)) };
+  }, [finance.budgets.transfer, finance.budgets.wagesWeekly, finance.wageBill, finance.transactions]);
+  const setBudget = useCallback((next) => {
+    if (!next) return;
+    if (next.transfer !== undefined) finance.setBudget('transfer', next.transfer);
+    if (next.wagesWeekly !== undefined) finance.setBudget('wagesWeekly', next.wagesWeekly);
+  }, [finance]);
   const [targetIds, setTargetIds] = useState([]);
   const [interestStars, setInterestStars] = useState({});
   const [negotiations, setNegotiations] = useState([]);
   const [incomingOffers, setIncomingOffers] = useState([
-    { id: 'inc-1', playerName: 'Marcus Rashford', fromClub: 'Chelsea', fee: 65_000_000, status: 'Pending' },
-    { id: 'inc-2', playerName: 'Kobbie Mainoo', fromClub: 'PSG', fee: 55_000_000, status: 'Pending' },
+    { id: 'inc-1', playerName: 'Jayden Okafor', fromClub: 'Chelsea', fee: 65_000_000, status: 'Pending' },
+    { id: 'inc-2', playerName: 'Tyrell Osei', fromClub: 'PSG', fee: 55_000_000, status: 'Pending' },
   ]);
   const [loansOut, setLoansOut] = useState([]);
   const [loansIn, setLoansIn] = useState([
@@ -107,9 +135,9 @@ export function TransfersProvider({ children }) {
   const [news, setNews] = useState([
     { time: '10:24', text: 'Chelsea have entered the race for Victor Osimhen' },
     { time: '09:17', text: 'PSG are monitoring Rafael Leão\'s situation' },
-    { time: 'Yesterday', text: 'Man Utd make initial offer for Florian Wirtz' },
+    { time: 'Yesterday', text: 'Newcastle make initial offer for Matteo Brunner' },
     { time: 'Yesterday', text: 'Liverpool interested in João Neves' },
-    { time: '2 days ago', text: 'Newcastle submit bid for Rasmus Højlund' },
+    { time: '2 days ago', text: 'Villarreal submit bid for Anders Krogh' },
   ]);
 
   const pushNews = useCallback((text) => {
@@ -128,12 +156,12 @@ export function TransfersProvider({ children }) {
     addTarget(playerId);
     setNegotiations(negs => {
       const existing = negs.find(n => n.playerId === playerId && n.status !== 'Completed' && n.status !== 'Withdrawn' && n.status !== 'Rejected');
+      const decision = negotiate(player, { fee: feeOffer, playingTime: player.preference >= 70 ? 72 : 55, roleScore: player.preference >= 70 ? 70 : 55 }, { reputation: 72, competition: 75 });
       const gap = player.asking - feeOffer;
-      let clubResponse, status, quote;
-      if (gap <= 0) { status = 'Club Agreed'; clubResponse = feeOffer; quote = `${player.club} accept your offer.`; }
-      else if (gap < player.asking * 0.08) { status = 'Negotiating'; clubResponse = player.asking; quote = `"€${Math.round(player.asking/1e6)}M guaranteed, and we won't go much lower."`; }
-      else { status = 'Negotiating'; clubResponse = Math.round(feeOffer + gap * 0.55); quote = `"We value ${player.name.split(' ').slice(-1)[0]} higher than that — try again."`; }
-      const entry = { id: existing?.id || `neg-${playerId}-${Date.now()}`, playerId, yourOffer: feeOffer, clubOffer: clubResponse, status, quote, round: (existing?.round || 0) + 1 };
+      const status = decision.status;
+      const clubResponse = status === 'Club Agreed' ? feeOffer : decision.counter;
+      const quote = status === 'Club Agreed' ? `${player.club} accept your offer.` : decision.score >= 60 ? `"We are open to a deal, but we need ${formatEUR(clubResponse)}."` : `"We value ${player.name.split(' ').slice(-1)[0]} higher than that — try again."`;
+      const entry = { id: existing?.id || `neg-${playerId}-${Date.now()}`, playerId, yourOffer: feeOffer, clubOffer: clubResponse, status, quote, round: (existing?.round || 0) + 1, playerDecisionScore: decision.score };
       pushNews(`${status === 'Club Agreed' ? 'Deal agreed' : 'Bid submitted'} for ${player.name} — €${Math.round(feeOffer/1e6)}M`);
       if (existing) return negs.map(n => n.id === existing.id ? entry : n);
       return [entry, ...negs];
@@ -165,11 +193,11 @@ export function TransfersProvider({ children }) {
       setBudget(b => ({ ...b, available: Math.max(0, b.available - neg.clubOffer), wageAvailable: Math.max(0, b.wageAvailable - (terms?.wage || 0)) }));
       finance.addTransaction(`${player.name} signing fee — ${player.club}`, -neg.clubOffer, 'Transfers');
       setHistory(h => [{
-        id: `hist-${negId}`, name: player.name, from: player.club, to: 'Man Utd', fee: neg.clubOffer,
+        id: `hist-${negId}`, name: player.name, from: player.club, to: currentClubName, fee: neg.clubOffer,
         date: 'Today', type: 'Transfer', wage: terms?.wage || 0, years: terms?.years || 4,
       }, ...h]);
       setSignings(s => [...s, { ...player, wage: terms?.wage, years: terms?.years }]);
-      pushNews(`${player.name} completes his move to Manchester United`);
+      pushNews(`${player.name} completes his move to ${currentClubName}`);
       return negs.map(n => n.id === negId ? { ...n, status: 'Completed' } : n);
     });
   }, [findPlayer, pushNews, finance]);
@@ -212,7 +240,7 @@ export function TransfersProvider({ children }) {
     const player = findPlayer(playerId);
     if (!player) return;
     makeOffer(playerId, Math.round(player.asking * 0.82));
-    pushNews(`Manchester United make contact with ${player.club} over ${player.name}.`);
+    pushNews(`${currentClubName} make contact with ${player.club} over ${player.name}.`);
   }, [findPlayer, makeOffer, pushNews]);
 
   // "Approach for Loan" — only realistic when the player is unhappy at
@@ -228,7 +256,7 @@ export function TransfersProvider({ children }) {
       if (existing) return las;
       return [{ id: `loanreq-${playerId}-${Date.now()}`, playerId, status: 'Pending' }, ...las];
     });
-    pushNews(`Manchester United enquire about a loan move for ${player.name}.`);
+    pushNews(`${currentClubName} enquire about a loan move for ${player.name}.`);
     return { ok: true };
   }, [findPlayer, pushNews]);
 
@@ -243,8 +271,9 @@ export function TransfersProvider({ children }) {
     // line reads the result is not guaranteed.
     const candidates = market.filter(p => !p.isOwn && p.status !== 'Not Interested' && p.interest?.length > 0);
     if (!candidates.length) return null;
-    const player = candidates[Math.floor(Math.random() * candidates.length)];
-    const buyer = player.interest[Math.floor(Math.random() * player.interest.length)]?.club;
+    const seedRng = createSeededRng(deriveSeed('ai-transfer', getCareerSeed(), candidates.map(c => c.id).join(',')));
+    const player = candidates[Math.floor(seedRng() * candidates.length)];
+    const buyer = player.interest[Math.floor(seedRng() * player.interest.length)]?.club;
     if (!buyer || buyer === player.club) return null;
     const moved = { name: player.name, from: player.club, to: buyer };
     setMarket(mkt => mkt.map(p => p.id === player.id
@@ -265,12 +294,12 @@ export function TransfersProvider({ children }) {
     history, signings, news, pushNews,
     findPlayer, formatEUR, formatEURShort,
     getSnapshot: () => ({
-      budget, targetIds, interestStars, negotiations, incomingOffers, loansOut, loansIn,
+      market, budget, targetIds, interestStars, negotiations, incomingOffers, loansOut, loansIn,
       transferListedRosterIds, loanApproaches, history, signings, news,
     }),
     restoreSnapshot: (s) => {
       if (!s) return;
-      if (s.budget) setBudget(s.budget);
+      if (s.market) setMarket(s.market);
       if (s.targetIds) setTargetIds(s.targetIds);
       if (s.interestStars) setInterestStars(s.interestStars);
       if (s.negotiations) setNegotiations(s.negotiations);

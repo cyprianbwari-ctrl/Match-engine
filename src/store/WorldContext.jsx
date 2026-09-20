@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useMemo, useCallback } from 'react';
-import { players as seedPlayers, leagues, wonderkids, transferActivity } from '../data/worldData.js';
+import React, { createContext, useContext, useState, useMemo, useCallback, useEffect } from 'react';
+import { useDatabase } from './DatabaseContext.jsx';
+import { simulateWorldDay } from '../engine/worldSimulation.js';
 
 const WorldCtx = createContext(null);
 
@@ -7,10 +8,25 @@ const POS_BUCKET = { GK: 0, CB: 1, LB: 1, RB: 1, DM: 2, CM: 2, CAM: 3, AM: 3, LW
 const avgForm = (p) => p.form.reduce((a, b) => a + b, 0) / p.form.length;
 
 export function WorldProvider({ children }) {
-  const [players, setPlayers] = useState(seedPlayers);
+  const db = useDatabase();
+  const [players, setPlayers] = useState(() => db.worldPlayers.map(p => ({...p, pos:p.pos||p.position, country:p.country||p.nation, rating:p.rating||p.ca||70, potential:p.potential||p.pa||p.rating||70, form:p.form||[72,74,76,75,77], change:p.change||0, availability:p.availability||'Available'})));
+
+  const simulateWorldDayStep = useCallback((dayIndex=1) => {
+    const result=simulateWorldDay(players,{dayIndex});
+    setPlayers(result.players);
+    return result.events || [];
+  }, [players]);
+  useEffect(() => {
+    if (!db.worldPlayers.length) return;
+    setPlayers(current => {
+      const byId = new Map(current.map(p => [String(p.id), p]));
+      return db.worldPlayers.map(p => ({ ...(byId.get(String(p.id)) || {}), ...p, pos: p.pos || p.position, country: p.country || p.nation, rating: p.rating || p.ca || 70, potential: p.potential || p.pa || p.rating || 70, form: p.form || [72,74,76,75,77], change: p.change || 0, availability: p.availability || 'Available' }));
+    });
+  }, [db.worldPlayers]);
+
   const [rankingMode, setRankingMode] = useState('ranking');
   const [rankingScope, setRankingScope] = useState('Top 100');
-  const [selectedId, setSelectedId] = useState(seedPlayers[0].id);
+  const [selectedId, setSelectedId] = useState(db.worldPlayers[0]?.id ?? db.players[0]?.id);
   const [profileOpen, setProfileOpen] = useState(false);
   const [shortlist, setShortlist] = useState([]);
   const [scouted, setScouted] = useState([]);
@@ -106,7 +122,7 @@ export function WorldProvider({ children }) {
     selectedId, setSelectedId: setSelectedId2, selectedPlayer, profileOpen, profileSource, setProfileOpen: closeProfileAware,
     shortlist, toggleShortlist, scouted, addScout, openProfileFor, closeProfile,
     filters, setFilters, searchResults,
-    leagues, wonderkids, transferActivity, reputationMovers, availablePlayers,
+    leagues: db.leagues, wonderkids: db.wonderkids, transferActivity: db.transferActivity, reputationMovers, availablePlayers, simulateWorldDayStep,
     getSnapshot: () => ({ shortlist, scouted }),
     restoreSnapshot: (s) => {
       if (!s) return;

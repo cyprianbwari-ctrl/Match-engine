@@ -1,4 +1,4 @@
-import { compat } from "../data/roster.js";
+import { compat } from "../data/tacticalDefinitions.js";
 
 // Greedy max-weight assignment: for every (slot, player) pair, take the
 // highest-compatibility pairing first, skipping anything already used.

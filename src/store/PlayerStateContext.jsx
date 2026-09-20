@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
-import { players as roster } from '../data/roster.js';
+import { useDatabase } from './DatabaseContext.jsx';
 import { useStaffData } from './StaffContext.jsx';
+import { createSeededRng, deriveSeed, pick, randomInt } from '../engine/seededRng.js';
+import { getCareerSeed } from '../engine/careerSeedStore.js';
+import { playerForUi, buildAuthoritativePlayer } from '../engine/playerModel.js';
 
 const PlayerStateCtx = createContext(null);
 
@@ -68,6 +71,8 @@ function defaultLiveState(p) {
 }
 
 export function PlayerStateProvider({ children }) {
+  const db = useDatabase();
+  const { careerSquad: roster } = db;
   const { staffList } = useStaffData();
   // Real staff quality — not decorative. A better coaching setup speeds up
   // development; better medical staff speeds up recovery. Both read from
@@ -119,34 +124,33 @@ export function PlayerStateProvider({ children }) {
   // (fitness, form, morale, injury...) from here. Live values win where
   // both exist.
   const mergePlayer = useCallback((rosterPlayer) => {
-    const live = liveStates[rosterPlayer.id];
-    if (!live) return rosterPlayer;
-    const isInjured = !!live.injury;
-    const isSuspended = !!live.suspension && live.suspension.matchesRemaining > 0;
+    if (!rosterPlayer) return null;
+    const live = liveStates[rosterPlayer.id] || {};
+    const merged = playerForUi(rosterPlayer, live);
+    const isInjured = !!merged.injury;
+    const isSuspended = !!merged.suspension && merged.suspension.matchesRemaining > 0;
     return {
-      ...rosterPlayer,
-      ovr: Math.round(live.currentAbility),
-      fit: Math.round(live.fitness),
-      form: live.form,
-      morale: live.morale,
-      rate: live.avgRating ?? rosterPlayer.rate,
-      injury: live.injury,
-      suspension: live.suspension,
-      sharpness: live.sharpness,
-      fatigue: live.fatigue,
-      happiness: live.happiness,
-      developmentTrend: live.developmentTrend,
-      relationships: live.relationships,
-      seasonStats: live.seasonStats,
-      careerStats: live.careerStats,
-      personality: live.personality,
-      agent: live.agent,
-      contractHistory: live.contractHistory,
-      abilityHistory: live.abilityHistory,
-      isAvailable: !isInjured && !isSuspended,
+      ...merged,
+      abilityHistory: live.abilityHistory || [],
       availability: isInjured ? 'Injured' : isSuspended ? 'Suspended' : (rosterPlayer.availability || 'Available'),
     };
   }, [liveStates]);
+
+  // Authoritative player read path. Static identity always comes from the
+  // canonical database; mutable career state always comes from liveStates.
+  // This prevents Squad, Match, Training, Scouting, Transfers and Profiles
+  // from constructing competing player objects.
+  const getAuthoritativePlayer = useCallback((id) => {
+    const base = db.getPlayer(id) || db.players.find(p => String(p.id) === String(id) || String(p.uid) === String(id));
+    if (!base) return null;
+    return buildAuthoritativePlayer(base, liveStates[base.id] || liveStates[id] || {});
+  }, [db, liveStates]);
+
+  const getPlayer = useCallback((id) => {
+    const base = db.getPlayer(id) || db.players.find(p => String(p.id) === String(id) || String(p.uid) === String(id));
+    if (!base) return null;
+    return playerForUi(base, liveStates[base.id] || liveStates[id] || {});
+  }, [db, liveStates]);
 
   // A renewal offer either lands or doesn't, based on how happy the player
   // already is and how the new wage compares to their current one — not a
@@ -161,7 +165,8 @@ export function PlayerStateProvider({ children }) {
       const newWage = Number(String(newWageStr).replace(/[^0-9]/g, '')) * (String(newWageStr).includes('k') ? 1000 : 1);
       const raisePct = ((newWage - currentWage) / currentWage) * 100;
       const chance = Math.min(95, Math.max(5, live.happiness * 0.5 + raisePct * 1.5));
-      const accepted = Math.random() * 100 < chance;
+      const renewalRng = createSeededRng(deriveSeed('renewal', getCareerSeed(), id, newWage, newContractYear));
+      const accepted = renewalRng() * 100 < chance;
       result = accepted
         ? { accepted: true, reason: `${rosterPlayer.name} agrees to new terms.` }
         : { accepted: false, reason: raisePct < 5 ? `${rosterPlayer.name}'s camp feels the offer undervalues him.` : `${rosterPlayer.name} wants more time to consider his future.` };
@@ -180,6 +185,53 @@ export function PlayerStateProvider({ children }) {
 
   const mergedRoster = useMemo(() => roster.map(mergePlayer), [mergePlayer]);
 
+  const applyTrainingSession = useCallback((sessionType, intensity = 60, focus = '', context = {}) => {
+    const intensityFactor = Math.max(0.25, Math.min(1.2, Number(intensity) / 70));
+    const focusMap = {
+      Finishing:['finishing','long_shot'], Passing:['passing','crossing','technique'], Dribbling:['dribbling','flair','technique'],
+      Strength:['strength','jumping'], Pace:['pace','agility'], Stamina:['stamina','work_rate'],
+      'Defensive Ability':['tackling','aggression'], Positioning:['positioning','decision','movement'], 'Set Pieces':['set_pieces','crossing','penalty'],
+    };
+    const baseAttrs = focusMap[focus] || (sessionType==='Attacking'?['finishing','movement','dribbling'] : sessionType==='Defending'?['tackling','positioning','decision'] : sessionType==='Possession'?['passing','technique','decision'] : sessionType==='Fitness'?['stamina','strength','pace'] : sessionType==='Set Pieces'?['set_pieces','crossing','penalty'] : []);
+    const coachRating = Number(context.coachRating ?? coachingQuality) || 3;
+    const coachFactor = 0.65 + Math.max(0, Math.min(5, coachRating))/5 * 0.7;
+    setLiveStates(ls => {
+      const next = { ...ls };
+      roster.forEach(player => {
+        const live = next[player.id] || defaultLiveState(player);
+        const rest = sessionType === 'Rest' || sessionType === 'Recovery';
+        const role = String(player.tacticalRole || player.roleLabel || player.role || player.position || '').toLowerCase();
+        const roleKey = String(player.position || '').toUpperCase();
+        const roleFocus = context.roleFocus?.[roleKey] || '';
+        const individualFocus = context.individualFocuses?.[player.id] || '';
+        const effectiveFocus = individualFocus || roleFocus || focus;
+        const attrs = focusMap[effectiveFocus] || baseAttrs;
+        const roleMatch = context.playerRole ? String(context.playerRole).toLowerCase().split(/\s+/).some(x=>role.includes(x)) : true;
+        const roleFactor = roleMatch ? 1.08 : 0.94;
+        const ageFactor = player.age <= 21 ? 1.22 : player.age <= 24 ? 1.1 : player.age <= 28 ? 0.85 : 0.55;
+        const potentialGap = Math.max(0, (player.pa ?? player.potential ?? player.ca ?? player.ovr ?? 0) - (live.currentAbility || player.ca || player.ovr || 0));
+        const potentialFactor = 0.75 + Math.min(1.25, potentialGap / 20);
+        const workloadFactor = live.fatigue > 75 ? 0.45 : live.fatigue > 55 ? 0.72 : 1;
+        const development = rest ? 0 : 0.10 * intensityFactor * coachFactor * ageFactor * potentialFactor * workloadFactor * roleFactor;
+        const trainingAttributes = {...(live.trainingAttributes || {})};
+        attrs.forEach(attr => { trainingAttributes[attr] = Math.min(100, (trainingAttributes[attr] ?? Number(player.attributes?.[attr] ?? 0)) + development); });
+        const abilityDelta = attrs.length ? development * Math.min(1, attrs.length / 2) : 0;
+        next[player.id] = {
+          ...live,
+          trainingAttributes,
+          currentAbility: Math.min(player.pa ?? player.potential ?? 99, (live.currentAbility || player.ca || player.ovr || 50) + abilityDelta * 0.18),
+          sharpness: Math.max(45, Math.min(100, live.sharpness + (rest ? 2 : Math.round(0.6 * intensityFactor)))),
+          fatigue: Math.max(0, Math.min(100, live.fatigue + (rest ? -7 : Math.round(4 * intensityFactor)))),
+          fitness: Math.max(45, Math.min(100, live.fitness + (rest ? 1 : -Math.max(0.5, intensityFactor * 1.5)))),
+          trainingProgress: Math.min(100, (live.trainingProgress || 0) + development),
+          developmentTrend: development > 0.04 ? 'Improving' : live.developmentTrend,
+          lastTraining: { sessionType, focus: effectiveFocus || 'General', coach: context.coachName || 'Coaching Staff', intensity:Number(intensity) },
+        };
+      });
+      return next;
+    });
+  }, [roster, coachingQuality]);
+
   const updateLive = useCallback((id, patch) => {
     setLiveStates(ls => ({ ...ls, [id]: { ...(ls[id] || defaultLiveState(roster.find(p => p.id === id) || {})), ...(typeof patch === 'function' ? patch(ls[id]) : patch) } }));
   }, []);
@@ -191,8 +243,9 @@ export function PlayerStateProvider({ children }) {
   const recordMatchPerformance = useCallback((id, { minutesPlayed = 90, rating = 6.8, started = true, goals = 0, assists = 0, shots = 0, tackles = 0, passesCompleted = 0, passesAttempted = 0, yellowCards = 0, redCard = false, cleanSheet = false }) => {
     updateLive(id, (prev) => {
       const base = prev || defaultLiveState(roster.find(p => p.id === id) || {});
-      const fitnessCost = Math.round((minutesPlayed / 90) * (12 + Math.random() * 8));
-      const fatigueGain = Math.round((minutesPlayed / 90) * (15 + Math.random() * 10));
+      const loadRng = createSeededRng(deriveSeed('match-load', getCareerSeed(), id, minutesPlayed));
+      const fitnessCost = Math.round((minutesPlayed / 90) * (12 + loadRng() * 8));
+      const fatigueGain = Math.round((minutesPlayed / 90) * (15 + loadRng() * 10));
       const newForm = [...(base.form || []), rating].slice(-6);
       const avg = newForm.reduce((a, b) => a + b, 0) / newForm.length;
       const moraleFromForm = avg >= 7.3 ? 'Very Good' : avg >= 6.8 ? 'Good' : avg >= 6.2 ? 'Okay' : 'Unhappy';
@@ -203,7 +256,7 @@ export function PlayerStateProvider({ children }) {
       const seasonYellows = (base.seasonStats?.yellowCards || 0) + yellowCards;
       let suspension = base.suspension;
       if (redCard && !suspension) {
-        suspension = { matchesRemaining: 1 + Math.floor(Math.random() * 2), reason: 'Red Card', competition: 'Premier League' };
+        suspension = { matchesRemaining: 1 + Math.floor(createSeededRng(deriveSeed('red-card-suspension', getCareerSeed(), id, minutesPlayed))() * 2), reason: 'Red Card', competition: 'Premier League' };
       } else if (seasonYellows > 0 && seasonYellows % 5 === 0 && !suspension) {
         suspension = { matchesRemaining: 1, reason: 'Accumulated Bookings', competition: 'Premier League' };
       }
@@ -263,9 +316,10 @@ export function PlayerStateProvider({ children }) {
   // A real injury record — not a flag. Severity determines the actual
   // recovery window, timed against the simulation's own calendar.
   const applyInjury = useCallback((id, currentDateLabel, forcedSeverity = null) => {
-    const pick = INJURY_TYPES[Math.floor(seededRand(id * 7 + Date.now() % 1000)() * INJURY_TYPES.length)];
+    const injuryRng = createSeededRng(deriveSeed('injury', getCareerSeed(), id, currentDateLabel, forcedSeverity || 'auto'));
+    const pick = INJURY_TYPES[Math.floor(injuryRng() * INJURY_TYPES.length)];
     const template = forcedSeverity ? INJURY_TYPES.find(t => t.severity === forcedSeverity) || pick : pick;
-    const days = template.days[0] + Math.round(Math.random() * (template.days[1] - template.days[0]));
+    const days = template.days[0] + Math.round(injuryRng() * (template.days[1] - template.days[0]));
     const injured = new Date(currentDateLabel);
     const expected = new Date(injured); expected.setDate(expected.getDate() + days);
     updateLive(id, (prev) => ({
@@ -288,7 +342,8 @@ export function PlayerStateProvider({ children }) {
       const live = liveStates[p.id];
       if (!live || live.injury) return;
       const risk = live.fatigue > 75 ? 0.012 : 0.003;
-      if (Math.random() < risk) {
+      const riskRng = createSeededRng(deriveSeed('daily-injury', getCareerSeed(), p.id, currentDateLabel));
+      if (riskRng() < risk) {
         const info = applyInjury(p.id, currentDateLabel, 'Knock');
         results.push({ id: p.id, name: p.name, ...info });
       }
@@ -339,9 +394,9 @@ export function PlayerStateProvider({ children }) {
         const potential = Math.min(96, p.ovr + (p.age < 24 ? 8 : p.age < 29 ? 2 : 0));
         let delta = 0;
         let trend = 'Stable';
-        if (p.age <= 23 && live.currentAbility < potential) { delta = (0.3 + Math.random() * 0.4) * coachFactor; trend = 'Improving'; }
-        else if (p.age >= 32) { delta = -(0.2 + Math.random() * 0.3); trend = 'Declining'; }
-        else { delta = (Math.random() - 0.5) * 0.2; trend = Math.abs(delta) < 0.05 ? 'Stable' : delta > 0 ? 'Improving' : 'Declining'; }
+        if (p.age <= 23 && live.currentAbility < potential) { delta = (0.3 + createSeededRng(deriveSeed('development-up', getCareerSeed(), p.id, currentDateLabel))() * 0.4) * coachFactor; trend = 'Improving'; }
+        else if (p.age >= 32) { delta = -(0.2 + createSeededRng(deriveSeed('development-down', getCareerSeed(), p.id, currentDateLabel))() * 0.3); trend = 'Declining'; }
+        else { delta = (createSeededRng(deriveSeed('development-stable', getCareerSeed(), p.id, currentDateLabel))() - 0.5) * 0.2; trend = Math.abs(delta) < 0.05 ? 'Stable' : delta > 0 ? 'Improving' : 'Declining'; }
         const newCA = Math.max(45, Math.min(96, live.currentAbility + delta));
         next[p.id] = {
           ...live,
@@ -356,13 +411,13 @@ export function PlayerStateProvider({ children }) {
   }, [coachingQuality]);
 
   const value = useMemo(() => ({
-    liveStates, getLive, mergePlayer, mergedRoster,
+    liveStates, getLive, mergePlayer, mergedRoster, getPlayer, getAuthoritativePlayer,
     recordMatchPerformance, applyInjury, advanceDay, applyMonthlyDevelopment,
     tickSuspensions, offerRenewal, coachingQuality, medicalQuality,
     awardsHistory, recordPlayerOfMonthAward,
     getSnapshot: () => ({ liveStates, awardsHistory }),
     restoreSnapshot: (s) => { if (s?.liveStates) setLiveStates(s.liveStates); if (s?.awardsHistory) setAwardsHistory(s.awardsHistory); },
-  }), [liveStates, getLive, mergePlayer, mergedRoster, recordMatchPerformance, applyInjury, advanceDay, applyMonthlyDevelopment, tickSuspensions, offerRenewal, coachingQuality, medicalQuality, awardsHistory, recordPlayerOfMonthAward]);
+  }), [liveStates, getLive, mergePlayer, mergedRoster, getPlayer, getAuthoritativePlayer, recordMatchPerformance, applyInjury, advanceDay, applyMonthlyDevelopment, tickSuspensions, offerRenewal, coachingQuality, medicalQuality, awardsHistory, recordPlayerOfMonthAward]);
 
   return <PlayerStateCtx.Provider value={value}>{children}</PlayerStateCtx.Provider>;
 }

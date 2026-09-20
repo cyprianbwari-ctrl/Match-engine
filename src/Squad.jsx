@@ -7,7 +7,7 @@ import {
   ArrowRightLeft, RefreshCcw, CornerUpRight, Ban, X
 } from 'lucide-react';
 import './squad.css';
-import { players as rosterSeed } from './data/roster.js';
+import { useDatabase } from './store/DatabaseContext.jsx';
 import { useWorldData } from './store/WorldContext.jsx';
 import { useStaffData } from './store/StaffContext.jsx';
 import { useClubData } from './store/ClubContext.jsx';
@@ -21,7 +21,7 @@ import { clubIdentity, stadium, clubReputation, squadStaffSummary } from './data
 // ---------- Shared bits ----------
 
 function Avatar({ name, size = 32, inXi = false }) {
-  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const initials = String(name || 'Player').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   return <span className={"sq-avatar" + (inXi ? " in-xi" : "")} style={{ width: size, height: size, fontSize: size * 0.34 }}>{initials}</span>;
 }
 
@@ -53,11 +53,11 @@ const BUCKET_LABEL = { GK: 'Goalkeeper', DEF: 'Defender', MID: 'Midfielder', ATT
 // ---------- Derived fields the roster doesn't store directly ----------
 // (kept in the same style as data/homeData.js's mapRosterPlayer, so numbers
 // stay consistent with what the rest of the app already derives from a player)
-function potentialOf(p) { return Math.min(96, p.ovr + 4); }
+function potentialOf(p) { return Math.max(Number(p.ovr) || 0, Number(p.pa ?? p.potential ?? p.pot ?? p.ovr) || 0); }
 function sharpnessOf(p) { return p.sharpness != null ? Math.round(p.sharpness) : Math.max(50, Math.min(99, Math.round(p.fit - 3 + (p.id % 7)))); }
 function appsOf(p) { return 14 + (p.id % 4); }
 function wageShort(p) { return String(p.wage || '').replace('/w', ''); }
-function moneyShort(v) { const n = Number(String(v).replace(/[^0-9]/g, '')); return n >= 1000000 ? `£${Math.round(n / 1000000)}M` : `£${Math.round(n / 1000)}k`; }
+function moneyShort(v) { const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^0-9.]/g, '')); if (!Number.isFinite(n) || n <= 0) return '£0'; return n >= 1000000 ? `£${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace('.0','')}M` : `£${Math.round(n / 1000)}k`; }
 
 const STATUS_CLASS = {
   'Key Player': 'st-key', 'First Team': 'st-regular', 'Squad Player': 'st-regular',
@@ -102,7 +102,7 @@ function SquadTable({ rows, onOpen, startingIds }) {
 
 // ================= OVERVIEW (first-team squad, matches approved design) =================
 
-function OverviewOv({ players, setPlayers, onOpen, goTo }) {
+function OverviewOv({ players, setPlayers, onOpen, goTo, clubName }) {
   const { formation, startingIds } = useTacticsData();
   const { league } = useCompetitionData();
   const { transferListedRosterIds, loansOut } = useTransfersData();
@@ -122,7 +122,7 @@ function OverviewOv({ players, setPlayers, onOpen, goTo }) {
   const attCount = firstTeamPool.filter(p => p.bucket === 'ATT').length;
   const avgOvr = Math.round(firstTeamPool.reduce((a, p) => a + p.ovr, 0) / firstTeamPool.length);
   const avgAge = (firstTeamPool.reduce((a, p) => a + p.age, 0) / firstTeamPool.length).toFixed(1);
-  const totalValue = firstTeamPool.reduce((a, p) => a + Number(String(p.value).replace(/[^0-9]/g, '')), 0);
+  const totalValue = firstTeamPool.reduce((a, p) => a + Number(p.valueNumber ?? (typeof p.value === 'number' ? p.value : String(p.value ?? '').replace(/[^0-9.]/g, ''))) || 0, 0);
   const keyPlayers = firstTeamPool.filter(p => p.playTime === 'Key Player').length;
   const regulars = firstTeamPool.filter(p => ['First Team', 'Squad Player'].includes(p.playTime)).length;
   const rotation = firstTeamPool.filter(p => ['Rotation', 'Backup', 'Third Choice', 'Emergency'].includes(p.playTime)).length;
@@ -142,8 +142,9 @@ function OverviewOv({ players, setPlayers, onOpen, goTo }) {
   const topPerformers = [...firstTeamPool].sort((a, b) => b.ovr - a.ovr).slice(0, 3);
 
   const fixture = league.fixtures[0];
-  const weAreHome = fixture ? fixture.home === 'Man Utd' : true;
-  const opponent = fixture ? (weAreHome ? fixture.away : fixture.home) : 'TBC';
+  const weAreHome = fixture ? fixture.home === clubName : true;
+  const opponent = String(fixture ? (weAreHome ? fixture.away : fixture.home) : 'TBC');
+  const displayClubName = String(clubName || clubIdentity?.name || 'Club');
   const oppAbbr = opponent.split(' ').map(w => w[0]).join('').slice(0, 3).toUpperCase();
   const usRow = league.table.find(r => r.us);
 
@@ -177,8 +178,8 @@ function OverviewOv({ players, setPlayers, onOpen, goTo }) {
 
     <div className="sq-card squad-info-card">
       <div className="si-block si-club">
-        <div className="crest-sq">MU</div>
-        <div className="si-club-name"><b>{clubIdentity.name}</b><small>First Team Squad</small></div>
+        <div className="crest-sq">{String(clubName || 'Club').slice(0, 3).toUpperCase()}</div>
+        <div className="si-club-name"><b>{clubName || 'Club'}</b><small>First Team Squad</small></div>
         <div className="si-circles">
           <div className="si-circle"><b>{firstTeamPool.length}</b><span>Players</span></div>
           <div className="si-circle"><b>{gkCount}</b><span>Goalkeepers</span></div>
@@ -296,7 +297,7 @@ function OverviewOv({ players, setPlayers, onOpen, goTo }) {
         <section className="sq-card next-match">
           <h3>Next Match</h3>
           <div className="nm-row">
-            <div className="nm-team"><div className="crest-sq small">MU</div><b>Man Utd</b></div>
+            <div className="nm-team"><div className="crest-sq small">{displayClubName.slice(0, 3).toUpperCase()}</div><b>{displayClubName}</b></div>
             <span>VS</span>
             <div className="nm-team"><div className="crest-sq small brighton">{oppAbbr}</div><b>{opponent}</b></div>
           </div>
@@ -419,21 +420,48 @@ const TABS = [['overview', 'Overview', Users], ['firstTeam', 'First Team', Shiel
 const NEW_SIGNING_POS_MAP = { GK:'GK', ST:'ST', LW:'AML', RW:'AMR', CAM:'AMC', AM:'AMC', CM:'MC', CDM:'DM', DM:'DM', CB:'DC', LB:'DL', RB:'DR', WB:'DR' };
 function bucketFor(displayPos) {
   if (displayPos === 'GK') return 'GK';
-  if (['DL','DR','DC'].includes(displayPos)) return 'DEF';
-  if (['DM','MC','AMC'].includes(displayPos)) return 'MID';
+  if (['DL','DR','DC','LB','RB','CB'].includes(displayPos)) return 'DEF';
+  if (['DM','MC','AMC','CM','CDM','CAM'].includes(displayPos)) return 'MID';
   return 'ATT';
 }
 
+function hydrateSquad(roster = []) {
+  return roster.map((player, index) => {
+    const displayPos = player.displayPos || player.pos || player.position || '—';
+    return {
+      ...player,
+      displayPos,
+      pos: displayPos,
+      bucket: player.bucket || bucketFor(displayPos),
+      ovr: Number(player.ovr ?? player.rating ?? player.ca ?? 0),
+      fit: Number(player.fit ?? 80),
+      form: Array.isArray(player.form) ? player.form : [7, 7, 7, 7],
+      morale: player.morale || 'Good',
+      playTime: player.playTime || 'Squad Player',
+      number: player.number ?? index + 1,
+      availability: player.availability || 'Available',
+    };
+  });
+}
+
 export default function SquadScreen({ setActive }) {
+  const { careerSquad: rosterSeed, careerClub } = useDatabase();
   const [tab, setTab] = useState('overview');
-  const [players, setPlayers] = useState(rosterSeed);
+  const [players, setPlayers] = useState(() => hydrateSquad(rosterSeed));
   const { openProfileFor } = useWorldData();
   const { startingIds } = useTacticsData();
   const { signings } = useTransfersData();
   const { mergePlayer } = usePlayerState();
   const livePlayers = useMemo(() => players.map(mergePlayer), [players, mergePlayer]);
+    const clubName = careerClub?.name || clubIdentity.name;
   const goTo = (screen) => setActive(screen);
   const onOpen = (p) => openProfileFor(mapRosterPlayer(p), 'Squad');
+
+  // The provider starts before a new career is confirmed. Refresh the local
+  // squad state when the player chooses a different club.
+  useEffect(() => {
+    setPlayers(hydrateSquad(rosterSeed));
+  }, [rosterSeed]);
 
   // Players bought through Transfers land here automatically — matched by
   // name so a completed signing only gets added to the roster once.
@@ -468,8 +496,15 @@ export default function SquadScreen({ setActive }) {
     <div className="squad-tabs">
       {TABS.map(([id, label, Icon]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={14} />{label}</button>)}
     </div>
+    <div className="squad-command-strip">
+      <span><b>{livePlayers.length}</b> players</span>
+      <span><b>{livePlayers.filter(p=>p.availability==='Injured').length}</b> injured</span>
+      <span><b>{livePlayers.filter(p=>p.fit>=88).length}</b> match ready</span>
+      <span><b>{livePlayers.filter(p=>p.morale==='Good').length}</b> positive morale</span>
+      <button onClick={()=>setTab('search')}><SearchIcon size={13}/>Find a player</button>
+    </div>
     {tab === 'overview' && <>
-      <OverviewOv players={players} setPlayers={setPlayers} onOpen={onOpen} goTo={goTo} />
+      <OverviewOv players={players} setPlayers={setPlayers} onOpen={onOpen} goTo={goTo} clubName={clubName} />
       <div className="sq-bottom-grid">
         <SquadRolesCard players={livePlayers} />
         <SquadManagementCard players={livePlayers} />

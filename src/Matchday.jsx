@@ -7,7 +7,7 @@ import './matchday.css';
 import { useCompetitionData } from './store/CompetitionContext.jsx';
 import { useTacticsData } from './store/TacticsContext.jsx';
 import { useSimulation } from './store/SimulationContext.jsx';
-import { players as roster } from './data/roster.js';
+import { useDatabase } from './store/DatabaseContext.jsx';
 import { fixtureDetail } from './data/fixtureDetail.js';
 import TacticsScreen from './Tactics.jsx';
 
@@ -37,16 +37,19 @@ function ordinal(n) {
 
 
 export default function MatchdayScreen({ setActive }) {
+  const db = useDatabase();
+  const { careerSquad: roster } = db;
   const [tab, setTab] = useState('Matchday');
   const { league } = useCompetitionData();
   const { formation, startXI, slots, assignment } = useTacticsData();
   const sim = useSimulation();
 
   const fixture = league.fixtures[0];
+  const currentClubName = db.careerClub?.name || 'Unassigned Club';
   const usRow = league.table.find(r => r.us);
-  const oppName = fixture ? (fixture.home === 'Man Utd' ? fixture.away : fixture.home) : 'Opponent';
+  const oppName = fixture ? (fixture.home === currentClubName ? fixture.away : fixture.home) : 'Opponent';
   const oppRow = league.table.find(r => r.club === oppName);
-  const weAreHome = fixture ? fixture.home === 'Man Utd' : true;
+  const weAreHome = fixture ? fixture.home === currentClubName : true;
   const opp = opponentProfile(oppName);
   const fixDetail = fixtureDetail(fixture, weAreHome);
 
@@ -54,21 +57,21 @@ export default function MatchdayScreen({ setActive }) {
   const reserves = roster.filter(p => !startXI.some(s => s.id === p.id) && !bench.some(b => b.id === p.id) && p.playTime !== 'Youth').slice(0, 5);
 
   const lastMeetings = [
-    { home: oppName, away: 'Man Utd', score: '1 - 2', date: 'Apr 2025' },
-    { home: 'Man Utd', away: oppName, score: '2 - 0', date: 'Dec 2024' },
-    { home: oppName, away: 'Man Utd', score: '1 - 1', date: 'May 2024' },
-    { home: 'Man Utd', away: oppName, score: '1 - 1', date: 'Nov 2023' },
-    { home: oppName, away: 'Man Utd', score: '0 - 2', date: 'Mar 2023' },
+    { home: oppName, away: currentClubName, score: '1 - 2', date: 'Apr 2025' },
+    { home: currentClubName, away: oppName, score: '2 - 0', date: 'Dec 2024' },
+    { home: oppName, away: currentClubName, score: '1 - 1', date: 'May 2024' },
+    { home: currentClubName, away: oppName, score: '1 - 1', date: 'Nov 2023' },
+    { home: oppName, away: currentClubName, score: '0 - 2', date: 'Mar 2023' },
   ];
 
   return <div className="mday-page">
     <div className="mday-banner">
       <div className="mday-banner-top">
         <span className="mday-tag">MATCHDAY</span>
-        <span className="mday-comp">Premier League · Matchday {league.table.reduce((a, r) => a + r.p, 0) > 0 ? Math.max(...league.table.map(r => r.p)) : 5}</span>
+        <span className="mday-comp">{league.name} · Matchday {league.table.reduce((a, r) => a + r.p, 0) > 0 ? Math.max(...league.table.map(r => r.p)) : 5}</span>
       </div>
       <div className="mday-versus">
-        <div className="mday-team"><div className="crest-sq">MU</div><b>MANCHESTER UNITED</b><span>{usRow ? `${ordinal(usRow.pos)} · ${usRow.pts} pts` : ''}</span></div>
+        <div className="mday-team"><div className="crest-sq">{currentClubName.slice(0,3).toUpperCase()}</div><b>{currentClubName.toUpperCase()}</b><span>{usRow ? `${ordinal(usRow.pos)} · ${usRow.pts} pts` : ''}</span></div>
         <div className="mday-vs"><b>VS</b><small>{fixture?.time || '17:30'}</small></div>
         <div className="mday-team"><div className="crest-sq brighton">{oppName.split(' ').map(w=>w[0]).join('').slice(0,3)}</div><b>{oppName.toUpperCase()}</b><span>{oppRow ? `${ordinal(oppRow.pos)} · ${oppRow.pts} pts` : ''}</span></div>
       </div>
@@ -101,7 +104,7 @@ export default function MatchdayScreen({ setActive }) {
 
         <section className="mday-panel">
           <h3><FileText size={15} /> Match Information</h3>
-          <div className="mday-mini-row"><Trophy size={13} /><span>Premier League</span></div>
+          <div className="mday-mini-row"><Trophy size={13} /><span>{league.name}</span></div>
           <div className="mday-mini-row"><Clock3 size={13} /><span>{fixture?.date === 'Today' ? 'Today' : fixture?.date}, {fixture?.time}</span></div>
           <div className="mday-mini-row"><Cloud size={13} /><span>{fixDetail.venue} · {fixDetail.weather}</span></div>
           <div className="mday-mini-row"><span>Attendance</span><b>{fixDetail.attendance.toLocaleString()} / {fixDetail.capacity.toLocaleString()}</b></div>
@@ -113,7 +116,7 @@ export default function MatchdayScreen({ setActive }) {
 
       <section className="mday-panel mday-preview">
         <h3><MessageSquare size={15} /> Match Preview</h3>
-        <p>A tough test at Old Trafford. {oppName} are in {oppRow && usRow && oppRow.pts > usRow.pts ? 'good' : 'mixed'} form and will look to exploit our defensive gaps. We need to be disciplined, control the midfield and make the most of our chances.</p>
+        <p>A tough test in this fixture. {oppName} are in {oppRow && usRow && oppRow.pts > usRow.pts ? 'good' : 'mixed'} form and will look to exploit our defensive gaps. We need to be disciplined, control the midfield and make the most of our chances.</p>
         <button className="mday-start-btn" onClick={() => { sim.lockForMatch(); setActive('Match'); }}><ShieldCheck size={16} /> Start Match <small>(Match Engine)</small></button>
       </section>
     </>}
@@ -139,7 +142,7 @@ export default function MatchdayScreen({ setActive }) {
 
     {tab === 'Match Preview' && <section className="mday-panel mday-preview">
       <h3><MessageSquare size={15} /> Match Preview</h3>
-      <p>A tough test at Old Trafford. {oppName} are in good form and will look to exploit our defensive gaps. We need to be disciplined, control the midfield and make the most of our chances.</p>
+      <p>A tough test in this fixture. {oppName} are in good form and will look to exploit our defensive gaps. We need to be disciplined, control the midfield and make the most of our chances.</p>
       <p className="mday-label">Last 5 Meetings</p>
       {lastMeetings.map((m, i) => <div className="mday-meeting-row" key={i}><span>{m.home}</span><b>{m.score}</b><span>{m.away}</span></div>)}
     </section>}

@@ -12,9 +12,21 @@ import { useClubState } from './store/ClubStateContext.jsx';
 import { useManagerData } from './store/ManagerContext.jsx';
 import { usePlayerState } from './store/PlayerStateContext.jsx';
 import { useTransfersData } from './store/TransfersContext.jsx';
+import { useFinanceData } from './store/FinanceContext.jsx';
+import { useCompetitionData } from './store/CompetitionContext.jsx';
 import * as D from './data/clubData.js';
+import { useDatabase } from './store/DatabaseContext.jsx';
+import { buildClubProfile, clubInitials, resolveDivisionLevel } from './engine/careerClub.js';
 
 // ---------- Shared bits ----------
+
+function getOrdinal(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return s[(v - 20) % 10] || s[v] || s[0]; }
+
+function useClubProfile() {
+  const db = useDatabase();
+  const level = resolveDivisionLevel(db.competitions, db.careerClub);
+  return buildClubProfile({ club: db.careerClub, stadiums: db.stadiums, divisionLevel: level });
+}
 
 function Stars({ value }) {
   const full = Math.floor(value), half = value % 1 >= 0.5;
@@ -23,7 +35,8 @@ function Stars({ value }) {
 }
 
 function Badge() {
-  return <div className="club-badge"><Shield size={40} color="#ffd76b" /><span>MU</span></div>;
+  const db = useDatabase();
+  return <div className="club-badge"><Shield size={40} color="#ffd76b" /><span>{clubInitials(db.careerClub)}</span></div>;
 }
 
 function ResBadge({ r }) {
@@ -48,31 +61,36 @@ function Toggle({ checked, onChange }) {
 // ================= CLUB INFORMATION ================= 
 
 function IdentityCard() {
-  const id = D.clubIdentity;
+  const db = useDatabase();
+  const profile = useClubProfile();
   const clubState = useClubState();
+  const club = db.careerClub;
+  const nation = club ? db.nations.find(n => String(n.nation_id) === String(club.countryId)) : null;
+  const competition = club ? db.competitions.find(c => String(c.competitionId ?? c.uid ?? c.id) === String(club.leagueId)) : null;
   return <section className="comm-card club-identity">
     <Badge />
     <div className="ci-main">
-      <h2>{id.name}</h2>
-      <span className="muted-sub">{id.nickname}</span>
-      <div className="ci-meta"><span>🏴 {id.country}</span><span>{id.league}</span></div>
+      <h2>{profile.name}</h2>
+      {profile.nickname && <span className="muted-sub">{profile.nickname}</span>}
+      <div className="ci-meta"><span>{nation?.name || profile.country || 'Unknown'}</span><span>{competition?.name || profile.league || 'Unknown League'}</span></div>
     </div>
-    <div className="ci-rep"><div><span>Reputation</span><b>Worldwide</b><Stars value={id.reputationWorldwide} /></div>
-      <div><span>Continental Reputation</span><b>Europe</b><Stars value={id.reputationContinental} /></div>
+    <div className="ci-rep"><div><span>Reputation</span><b>Worldwide</b><Stars value={profile.stars5} /></div>
+      <div><span>Continental Reputation</span><b>Europe</b><Stars value={Math.max(1, profile.stars5 - 1)} /></div>
       <div><span>Board Confidence</span><b style={{ color: clubState.boardConfidence >= 60 ? '#3ddc84' : clubState.boardConfidence >= 40 ? '#f2c94c' : '#ef4f4f' }}>{clubState.confidenceTier}</b><small className="muted-sub">{clubState.boardConfidence}% · Target: {clubState.seasonExpectation.label}</small></div></div>
-    <div className="ci-kits">{id.kits.map(k => <div className="kit" key={k.label}><i style={{ background: k.color, border: k.border ? '1px solid #999' : 'none' }} /><span>{k.label}</span></div>)}</div>
+    <div className="ci-kits">{profile.kits.map(k => <div className="kit" key={k.label}><i style={{ background: k.color, border: k.border ? '1px solid #999' : 'none' }} /><span>{k.label}</span></div>)}</div>
   </section>;
 }
 
 function StadiumCard() {
-  const s = D.stadium;
+  const profile = useClubProfile();
+  const s = profile.stadium;
   return <section className="comm-card stadium-card">
     <div className="stadium-photo"><Building2 size={40} color="#c8d0e6" /></div>
     <div className="stadium-info">
       <h3>{s.name}</h3>
-      <div><span>Capacity</span><b>{s.capacity.toLocaleString()}</b></div>
-      <div><span>Training Ground</span><b className="good">{D.trainingGround.level}</b></div>
-      <div><span>Youth Facilities</span><b className="good">{D.youthAcademy.youthFacilities}</b></div>
+      <div><span>Capacity</span><b>{(s.capacity || 0).toLocaleString()}</b></div>
+      <div><span>Training Ground</span><b className="good">{profile.trainingGround.level}</b></div>
+      <div><span>Youth Facilities</span><b className="good">{profile.youthAcademy.youthFacilities}</b></div>
     </div>
   </section>;
 }
@@ -86,16 +104,26 @@ function InfoTile({ icon: Icon, title, rows, onClick }) {
 }
 
 function InfoTiles({ goTo }) {
-  const s = D.stadium, tg = D.trainingGround, ya = D.youthAcademy, rep = D.clubReputation, be = D.boardExpectations, obj = D.clubObjectives, fin = D.financesSummary, ss = D.squadStaffSummary;
+  const profile = useClubProfile();
+  const db = useDatabase();
+  const { staffList } = useStaffData();
+  const finance = useFinanceData();
+  const clubState = useClubState();
+  const s = profile.stadium, tg = profile.trainingGround, ya = profile.youthAcademy;
+  const rep = D.clubReputation;
+  const be = { headline: [clubState.seasonExpectation.label, 'Develop young players', 'Maintain financial stability'] };
+  const obj = [clubState.seasonExpectation.label, 'Develop youth players', 'Maintain financial stability'];
+  const balance = `£${Math.round(finance.balance || 0).toLocaleString()}`;
+  const coachingStaff = staffList.filter(st => st.dept === 'Coaching').length;
   return <div className="info-tile-grid">
-    <InfoTile icon={Landmark} title="Stadium" rows={[[s.name], ['Capacity:', s.capacity.toLocaleString()], ['Year Built:', s.yearBuilt], ['Pitch Quality:', s.pitchQuality, 'good']]} />
+    <InfoTile icon={Landmark} title="Stadium" rows={[[s.name], ['Capacity:', (s.capacity || 0).toLocaleString()], ['Pitch Quality:', s.pitchQuality, 'good']]} />
     <InfoTile icon={Building2} title="Training Ground" rows={[[tg.name], ['Level:', tg.level, 'good'], ['Facilities:', tg.facilities]]} />
     <InfoTile icon={GraduationCap} title="Youth Academy" rows={[['Youth System:', ya.youthSystem], ['Scouting Network:', ya.scoutingNetwork], ['Youth Facilities:', ya.youthFacilities, 'good']]} />
     <InfoTile icon={Trophy} title="Club Reputation" rows={[['Worldwide'], ['Domestic:', rep.domestic], ['Continental:', rep.continental]]} />
     <InfoTile icon={ClipboardList} title="Board Expectations" rows={be.headline.map(h => [h])} />
     <InfoTile icon={Target} title="Club Objectives" rows={obj.slice(0, 3).map(o => [o])} />
-    <InfoTile icon={Coins} title="Finances (Current Season)" rows={[['Balance:', fin.balance], ['Transfer Budget:', fin.transferBudget], ['Wage Structure:', fin.wageStructure, 'good']]} onClick={() => goTo('Finance')} />
-    <InfoTile icon={Users} title="Squad & Staff" rows={[['Senior Squad:', ss.seniorSquad], ['Total Staff:', ss.totalStaff], ['Coaching Staff:', ss.coachingStaff]]} onClick={() => goTo('Squad')} />
+    <InfoTile icon={Coins} title="Finances (Current Season)" rows={[['Balance:', balance], ['Transfer Budget:', profile.transferBudget], ['Status:', finance.financialStatus, 'good']]} onClick={() => goTo('Finance')} />
+    <InfoTile icon={Users} title="Squad & Staff" rows={[['Senior Squad:', db.careerSquad.length], ['Total Staff:', staffList.length], ['Coaching Staff:', coachingStaff]]} onClick={() => goTo('Squad')} />
   </div>;
 }
 
@@ -115,14 +143,22 @@ function HonoursHistoryCard() {
     ...transferHistory.map(h => ({ date: h.date, event: `Signed ${h.name}`, detail: `${h.from} → ${h.to} · £${Math.round(h.fee).toLocaleString()}`, source: 'Transfer' })),
   ].slice(-40).reverse();
 
+  const profile = useClubProfile();
+
   return <section className="comm-card">
     <div className="sub-tabs">{['Honours', 'Records', 'History', 'This Season'].map(t => <button key={t} className={sub === t ? 'active' : ''} onClick={() => setSub(t)}>{t === 'Honours' ? 'Honours & Trophies' : t === 'Records' ? 'Club Records' : t}</button>)}</div>
     {sub === 'Honours' && <>
       <div className="panel-label">Major Honours</div>
-      <div className="honours-grid">{D.majorHonours.map(h => <div className="honour-card" key={h.name}><Trophy size={22} color="#ffd76b" /><b>{h.count}</b><span>{h.name}</span><small>(Last: {h.last})</small></div>)}</div>
+      {profile.majorHonours
+        ? <div className="honours-grid">{profile.majorHonours.map(h => <div className="honour-card" key={h.name}><Trophy size={22} color="#ffd76b" /><b>{h.count}</b><span>{h.name}</span><small>(Last: {h.last})</small></div>)}</div>
+        : <p className="muted-sub">Trophy history isn't tracked yet for this club.</p>}
     </>}
-    {sub === 'Records' && D.clubRecords.map(r => <div className="objective-row" key={r.label}><Star size={14} color="#ffd76b" /><div><b>{r.label}</b><span>{r.value}</span></div></div>)}
-    {sub === 'History' && D.clubHistory.map(h => <div className="achievement-row" key={h.year}><b>{h.year}</b><span>{h.text}</span></div>)}
+    {sub === 'Records' && (profile.clubRecords
+      ? profile.clubRecords.map(r => <div className="objective-row" key={r.label}><Star size={14} color="#ffd76b" /><div><b>{r.label}</b><span>{r.value}</span></div></div>)
+      : <p className="muted-sub">Club records aren't tracked yet for this club.</p>)}
+    {sub === 'History' && (profile.clubHistory
+      ? profile.clubHistory.map(h => <div className="achievement-row" key={h.year}><b>{h.year}</b><span>{h.text}</span></div>)
+      : <p className="muted-sub">Founding history isn't tracked yet for this club.</p>)}
     {sub === 'This Season' && <>
       {thisSeasonHistory.length === 0 && <p className="muted-sub">Nothing significant recorded yet this season.</p>}
       {thisSeasonHistory.map((h, i) => <div className="achievement-row" key={i}><b>{h.date}</b><span>{h.event}</span><small className="muted-sub" style={{ marginLeft: 8 }}>{h.detail}</small></div>)}
@@ -131,30 +167,49 @@ function HonoursHistoryCard() {
 }
 
 function RivalsAffiliatesCard() {
+  const profile = useClubProfile();
   return <div className="two-col">
     <section className="comm-card">
       <div className="comm-card-head"><Swords size={16} color="#ff6b6b" /><h3>Rivals</h3></div>
-      <div className="club-chip-grid">{D.rivals.map(r => <div className="club-chip" key={r.name}><span className="chip-badge">{r.name.slice(0, 2).toUpperCase()}</span><div><b>{r.name}</b><span>{r.tag}</span></div></div>)}</div>
+      {profile.rivals
+        ? <div className="club-chip-grid">{profile.rivals.map(r => <div className="club-chip" key={r.name}><span className="chip-badge">{r.name.slice(0, 2).toUpperCase()}</span><div><b>{r.name}</b><span>{r.tag}</span></div></div>)}</div>
+        : <p className="muted-sub">Rivalries aren't tracked yet for this club.</p>}
     </section>
     <section className="comm-card">
       <div className="comm-card-head"><Handshake size={16} color="#3ddc84" /><h3>Affiliated Clubs</h3><button className="link-btn">View All</button></div>
-      <div className="club-chip-grid">{D.affiliatedClubs.map(r => <div className="club-chip" key={r.name}><span className="chip-badge">{r.name.slice(0, 2).toUpperCase()}</span><div><b>{r.name}</b><span>{r.tag}</span></div></div>)}</div>
+      {profile.curated
+        ? <div className="club-chip-grid">{D.affiliatedClubs.map(r => <div className="club-chip" key={r.name}><span className="chip-badge">{r.name.slice(0, 2).toUpperCase()}</span><div><b>{r.name}</b><span>{r.tag}</span></div></div>)}</div>
+        : <p className="muted-sub">No affiliated clubs on record.</p>}
     </section>
   </div>;
 }
 
 function SeasonSummaryCard({ goTo }) {
+  const { league, form, allResults } = useCompetitionData();
+  const usRow = league.table.find(r => r.us);
+  const rows = [
+    { label: 'League Position', value: usRow ? `${usRow.pos}${getOrdinal(usRow.pos)} (${usRow.p} games)` : '—' },
+    { label: 'Points', value: usRow ? `${usRow.pts} pts` : '—' },
+    { label: 'Goal Difference', value: usRow ? (usRow.gd > 0 ? `+${usRow.gd}` : usRow.gd) : '—' },
+  ];
+  const last5 = allResults.slice(0, 5).map(m => {
+    const usHome = m.home === league.table.find(r => r.us)?.club;
+    const [hs, as] = String(m.score).split(' - ').map(Number);
+    const gf = usHome ? hs : as, ga = usHome ? as : hs;
+    const result = gf > ga ? 'W' : gf < ga ? 'L' : 'D';
+    return { opp: usHome ? m.away : m.home, score: m.score, result };
+  });
   return <section className="comm-card">
-    <div className="comm-card-head"><CalendarDays size={16} color="#4d9dff" /><h3>Current Season Summary</h3><button className="link-btn">View Details</button></div>
+    <div className="comm-card-head"><CalendarDays size={16} color="#4d9dff" /><h3>Current Season Summary</h3><button className="link-btn" onClick={() => goTo('Competitions')}>View Details</button></div>
     <div className="season-summary-body">
       <div className="season-rows">
-        {D.seasonSummary.map(r => <button className="season-row" key={r.label} onClick={() => goTo('Competitions')}><span>{r.label}</span><b>{r.value}</b><ChevronRight size={14} /></button>)}
+        {rows.map(r => <button className="season-row" key={r.label} onClick={() => goTo('Competitions')}><span>{r.label}</span><b>{r.value}</b><ChevronRight size={14} /></button>)}
       </div>
       <div className="season-side">
         <div className="panel-label">Form</div>
-        <div className="form-row">{D.recentForm.map((r, i) => <ResBadge r={r} key={i} />)}</div>
+        <div className="form-row">{form.map((r, i) => <ResBadge r={r} key={i} />)}</div>
         <div className="panel-label" style={{ marginTop: 8 }}>Last 5 Matches</div>
-        {D.last5Matches.map((m, i) => <div className="last5-row" key={i}><ResBadge r={m.result} /><span>{m.score}</span><small>{m.opp}</small></div>)}
+        {last5.map((m, i) => <div className="last5-row" key={i}><ResBadge r={m.result} /><span>{m.score}</span><small>{m.opp}</small></div>)}
       </div>
     </div>
   </section>;
@@ -288,7 +343,7 @@ export default function ClubScreen({ setActive, initialTab }) {
   return <div className="world-page">
     <div className="comm-header">
       <span className="comm-header-icon" style={{ background: 'linear-gradient(150deg,#e5394f,#5a0f18)' }}><Shield size={22} /></span>
-      <div><h1>Club Dashboard</h1><span>Club information and settings for Manchester United.</span></div>
+      <div><h1>Club Dashboard</h1><span>Club information and settings for Newcastle United.</span></div>
     </div>
     <div className="comm-tabs">
       <button className={tab === 'info' ? 'active' : ''} onClick={() => setTab('info')}><Info size={16} />Club Information</button>

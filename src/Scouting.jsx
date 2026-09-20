@@ -8,6 +8,7 @@ import "./scouting.css";
 import { useStaffData } from "./store/StaffContext.jsx";
 import { useTransfersData } from "./store/TransfersContext.jsx";
 import { useWorldData } from "./store/WorldContext.jsx";
+import { useDatabase } from "./store/DatabaseContext.jsx";
 
 // Real-world identity/current-club data is kept separate from FAMILY26 game ratings.
 // Current-season numbers shown in the selected-player panel are real football statistics.
@@ -15,17 +16,17 @@ const scoutPlayers = [
   { id: 1, name: "Jamal Musiala", pos: "AM", age: 23, nat: "🇩🇪", country: "Germany", club: "Bayern Munich", league: "Bundesliga", ovr: 88, pot: 93, status: "Shortlist", accent: "JM", stats: { apps: 3, mins: 190, goals: 1, assists: 1, shots: 7, pass: 88, value: "€120M", foot: "Right" }, report: "Elite creator with close control and game-breaking movement.", scout: "J. Carter", date: "10 Sep 2026", recommendation: "Highly Recommended" },
   { id: 2, name: "Victor Osimhen", pos: "ST", age: 27, nat: "🇳🇬", country: "Nigeria", club: "Galatasaray", league: "Süper Lig", ovr: 86, pot: 90, status: "In Progress", accent: "VO", stats: { apps: 4, mins: 302, goals: 6, assists: 2, shots: 35, pass: 74, value: "€73M", foot: "Right" }, report: "Explosive striker; elite finishing, pace and aerial threat.", scout: "J. Carter", date: "9 Sep 2026", recommendation: "Highly Recommended", injury: "Muscle injury · expected return October 2026" },
   { id: 3, name: "Rafael Leão", pos: "LW", age: 27, nat: "🇵🇹", country: "Portugal", club: "Galatasaray", league: "Süper Lig", ovr: 85, pot: 90, status: "Watching", accent: "RL", stats: { apps: 1, mins: 23, goals: 0, assists: 0, shots: 1, pass: 86, value: "€45M", foot: "Right" }, report: "Powerful wide forward with elite carrying and transition threat.", scout: "M. Silva", date: "8 Sep 2026", recommendation: "Good Potential" },
-  { id: 4, name: "Alejandro Garnacho", pos: "LW", age: 22, nat: "🇦🇷", country: "Argentina", club: "Chelsea", league: "Premier League", ovr: 84, pot: 89, status: "Shortlist", accent: "AG", stats: { apps: 23, mins: 1430, goals: 1, assists: 3, shots: 31, pass: 79, value: "€45M", foot: "Right" }, report: "Direct winger who attacks space and isolates full-backs.", scout: "J. Carter", date: "7 Sep 2026", recommendation: "Recommended" },
+  { id: 4, name: "Mateo Villanueva", pos: "LW", age: 22, nat: "🇦🇷", country: "Argentina", club: "Chelsea", league: "Premier League", ovr: 84, pot: 89, status: "Shortlist", accent: "AG", stats: { apps: 23, mins: 1430, goals: 1, assists: 3, shots: 31, pass: 79, value: "€45M", foot: "Right" }, report: "Direct winger who attacks space and isolates full-backs.", scout: "J. Carter", date: "7 Sep 2026", recommendation: "Recommended" },
   { id: 5, name: "Warren Zaïre-Emery", pos: "CM", age: 20, nat: "🇫🇷", country: "France", club: "Paris SG", league: "Ligue 1", ovr: 83, pot: 92, status: "Watching", accent: "WZ", stats: { apps: 3, mins: 214, goals: 0, assists: 0, shots: 2, pass: 91, value: "€78M", foot: "Right" }, report: "Press-resistant midfielder with exceptional maturity and passing.", scout: "M. Silva", date: "6 Sep 2026", recommendation: "Top Target" },
   { id: 6, name: "Joško Gvardiol", pos: "CB", age: 24, nat: "🇭🇷", country: "Croatia", club: "Man City", league: "Premier League", ovr: 82, pot: 87, status: "Shortlist", accent: "JG", stats: { apps: 5, mins: 345, goals: 1, assists: 0, shots: 3, pass: 85, value: "€75M", foot: "Left" }, report: "Modern defender comfortable defending space and progressing the ball.", scout: "D. Rossi", date: "5 Sep 2026", recommendation: "Top Target" },
-  { id: 7, name: "Benjamin Šeško", pos: "ST", age: 23, nat: "🇸🇮", country: "Slovenia", club: "Man Utd", league: "Premier League", ovr: 81, pot: 91, status: "In Progress", accent: "BS", stats: { apps: 4, mins: 56, goals: 2, assists: 0, shots: 4, pass: 74, value: "€73M", foot: "Right" }, report: "High-upside striker with pace, height and elite box movement.", scout: "L. Fernandez", date: "4 Sep 2026", recommendation: "Interesting" },
+  { id: 7, name: "Luka Hočevar", pos: "ST", age: 23, nat: "🇸🇮", country: "Slovenia", club: "RB Leipzig", league: "Premier League", ovr: 81, pot: 91, status: "In Progress", accent: "BS", stats: { apps: 4, mins: 56, goals: 2, assists: 0, shots: 4, pass: 74, value: "€73M", foot: "Right" }, report: "High-upside striker with pace, height and elite box movement.", scout: "L. Fernandez", date: "4 Sep 2026", recommendation: "Interesting" },
   { id: 8, name: "Pedro Neto", pos: "RW", age: 26, nat: "🇵🇹", country: "Portugal", club: "Chelsea", league: "Premier League", ovr: 80, pot: 85, status: "Watching", accent: "PN", stats: { apps: 23, mins: 1500, goals: 5, assists: 7, shots: 32, pass: 81, value: "€52M", foot: "Left" }, report: "Fast, creative winger who creates chances from wide areas.", scout: "P. Mendes", date: "3 Sep 2026", recommendation: "Good Potential" },
   { id: 9, name: "Moisés Caicedo", pos: "CDM", age: 24, nat: "🇪🇨", country: "Ecuador", club: "Chelsea", league: "Premier League", ovr: 79, pot: 84, status: "Shortlist", accent: "MC", stats: { apps: 104, mins: 7900, goals: 5, assists: 6, shots: 42, pass: 89, value: "€80M", foot: "Right" }, report: "Ball-winning midfielder with elite recovery and defensive range.", scout: "J. Carter", date: "2 Sep 2026", recommendation: "Recommended" },
   { id: 10, name: "Jarrad Branthwaite", pos: "CB", age: 24, nat: "🏴", country: "England", club: "Everton", league: "Premier League", ovr: 78, pot: 83, status: "Watching", accent: "JB", stats: { apps: 85, mins: 7200, goals: 5, assists: 0, shots: 12, pass: 82, value: "€42M", foot: "Left" }, report: "Dominant left-footed centre-back with excellent aerial reach.", scout: "D. Rossi", date: "1 Sep 2026", recommendation: "Watching" }
 ];
 
 const extraPlayers = [
-  [11,"Florian Wirtz","AM",23,"🇩🇪","Bayer Leverkusen","Bundesliga",88,94,"Shortlist","FW","€110M"],
+  [11,"Matteo Brunner","AM",23,"🇩🇪","Bayer Leverkusen","Bundesliga",88,94,"Shortlist","FW","€110M"],
   [12,"Lamine Yamal","RW",19,"🇪🇸","Barcelona","La Liga",91,96,"Shortlist","LY","€200M"],
   [13,"William Saliba","CB",25,"🇫🇷","Real Madrid","La Liga",87,90,"Watching","WS","€90M"],
   [14,"Declan Rice","CM",27,"🏴","Arsenal","Premier League",86,88,"Shortlist","DR","€110M"],
@@ -98,7 +99,7 @@ function WorldScouting() {
 
 function AssignmentsBoard() {
   const { scoutAssignments, addScoutAssignment, updateScoutAssignmentStatus } = useStaffData();
-  const scoutNames = ["Marco Silva", "Carlos Mendes", "Sophie Lambert", "Kenji Tanaka", "Rasmus Højlund", "Lukas Weber", "Fatou Diop", "Steve McClaren"];
+  const scoutNames = ["Mateo Rocha", "Carlos Mendes", "Sophie Lambert", "Kenji Tanaka", "Anders Krogh", "Lukas Weber", "Fatou Diop", "Steve Callahan"];
   const [scout, setScout] = useState(scoutNames[0]);
   const [region, setRegion] = useState("");
   const [focus, setFocus] = useState("");
@@ -131,6 +132,7 @@ function AssignmentsBoard() {
 
 function ScoutingScreen({ setActive }) {
   const { market, addTarget, makeOffer } = useTransfersData();
+  const db = useDatabase();
   const { openProfileFor } = useWorldData();
   const [tab,setTab]=useState("Scouting");
   const [position,setPosition]=useState("All Positions");
@@ -143,7 +145,9 @@ function ScoutingScreen({ setActive }) {
   const [selected,setSelected]=useState(scoutPlayers[1]);
   const [shortlisted,setShortlisted]=useState(false);
   const tabs=["Scouting","Search Players","Shortlist","Assignments","Scout Reports"];
-  const filtered=useMemo(()=>allPlayers.filter(p=>{
+  const databasePlayers = useMemo(() => (db.players || []).slice(0, 2000).map((p, i) => ({ id:`db-${p.id ?? i}`, name:p.name || `Player ${p.id ?? i}`, pos:p.position || p.pos || 'CM', age:p.age || 24, nat:p.nat || '🌍', country:p.country || '', club:p.club || 'Unknown Club', league:p.league || 'Unknown League', ovr:p.ca || p.rating || 65, pot:p.pa || p.potential || p.ca || 65, status:'Watching', accent:(p.name||'PL').split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase(), stats:{apps:0,mins:0,goals:0,assists:0,shots:0,pass:0,value:'—',foot:p.preferredFoot||'Right'}, report:'Database player available for scouting.', scout:'Database', date:'Live database', recommendation:'Pending' })), [db.players]);
+  const searchablePlayers = useMemo(() => [...allPlayers, ...databasePlayers], [databasePlayers]);
+  const filtered=useMemo(()=>searchablePlayers.filter(p=>{
     const q=query.trim().toLowerCase();
     return (!q||p.name.toLowerCase().includes(q)||p.club.toLowerCase().includes(q))
       && (position==="All Positions"||p.pos===position)
@@ -151,7 +155,7 @@ function ScoutingScreen({ setActive }) {
       && (nation==="All Nations"||p.nat===nation)
       && (league==="All Leagues"||p.league===league)
       && (team==="All Clubs"||p.club===team);
-  }),[query,position,age,nation,league,team]);
+  }),[query,position,age,nation,league,team,searchablePlayers]);
   const updateFilter=(setter)=>value=>{setter(value);setPage(1)};
   const tabFiltered = tab==="Shortlist" ? filtered.filter(p=>p.status==="Shortlist") : filtered;
   if (tab === "Assignments") {
@@ -167,7 +171,7 @@ function ScoutingScreen({ setActive }) {
       <FilterSelect label="Age" value={age} onChange={updateFilter(setAge)} options={["All Ages","U21","22-25","26+"]}/>
       <FilterSelect label="Nationality" value={nation} onChange={updateFilter(setNation)} options={["All Nations","🇩🇪","🇳🇬","🇵🇹","🇦🇷","🇫🇷","🇭🇷","🇸🇮","🇪🇨","🏴"]}/>
       <FilterSelect label="League" value={league} onChange={updateFilter(setLeague)} options={["All Leagues","Premier League","Bundesliga","Süper Lig","Ligue 1","La Liga"]}/>
-      <FilterSelect label="Team" value={team} onChange={updateFilter(setTeam)} options={["All Clubs","Man Utd","Galatasaray","Chelsea","Bayern Munich","Paris SG","Man City","Everton"]}/>
+      <FilterSelect label="Team" value={team} onChange={updateFilter(setTeam)} options={["All Clubs","Newcastle","Galatasaray","Chelsea","Bayern Munich","Paris SG","Man City","Everton"]}/>
       <div className="player-search"><Search size={16}/><input value={query} onChange={e=>{setQuery(e.target.value);setPage(1)}} placeholder="Search player name..."/><button onClick={()=>setPage(1)}>Search</button></div>
     </div>
     <div className="scouting-columns">

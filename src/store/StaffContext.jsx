@@ -11,7 +11,7 @@ function candidateToStaff(cand, nextId) {
   return {
     id: nextId, name: cand.name, dept: cand.staffType, category: cand.category, role: cand.category, title: cand.category,
     nat: cand.nat, age: cand.age, contract: '30 Jun 2027', rating: Math.min(5, 2.5 + cand.reputation * 0.5), color: 'gold',
-    club: 'Manchester United', status: 'Active', wage: cand.wageDemand, workload: 20, attributes: cand.attributes, assignment: null
+    club: 'Newcastle United', status: 'Active', wage: cand.wageDemand, workload: 20, attributes: cand.attributes, assignment: null
   };
 }
 

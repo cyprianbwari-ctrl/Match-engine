@@ -7,7 +7,7 @@ import {
 import "./transfers.css";
 import { useTransfersData, formatEURShort } from "./store/TransfersContext.jsx";
 import { useWorldData } from "./store/WorldContext.jsx";
-import { players as rosterPlayers } from "./data/roster.js";
+import { useDatabase } from "./store/DatabaseContext.jsx";
 
 const TABS = [
   ["Market", "Transfer Market", RefreshCw],
@@ -254,7 +254,7 @@ function OffersTab({ market }) {
     <section className="tr-panel">
       <h3><FileText size={16} /> Incoming — Offers For Your Players</h3>
       {incomingOffers.map(o => <div className="offer-row" key={o.id}>
-        <ClubCrest club={o.fromClub} /><div><b>{o.fromClub} → Manchester United</b><small>{o.playerName}</small></div>
+        <ClubCrest club={o.fromClub} /><div><b>{o.fromClub} → Newcastle United</b><small>{o.playerName}</small></div>
         <strong>{formatEURShort(o.fee)}</strong>
         {o.status === "Pending" ? <div className="offer-actions">
           <button onClick={() => respondIncoming(o.id, "reject")}>Reject</button>
@@ -270,7 +270,7 @@ function OffersTab({ market }) {
         const player = market.find(p => p.id === n.playerId);
         if (!player) return null;
         return <div className="offer-row" key={n.id}>
-          <ClubCrest club={player.club} /><div><b>Manchester United → {player.club}</b><small>{player.name}</small></div>
+          <ClubCrest club={player.club} /><div><b>Newcastle United → {player.club}</b><small>{player.name}</small></div>
           <strong>{formatEURShort(n.yourOffer)}</strong>
           <span className={`status-pill ${n.status === "Completed" ? "st-listed" : n.status === "Withdrawn" || n.status === "Rejected" ? "st-notint" : "st-negotiable"}`}>{n.status}</span>
         </div>;
@@ -369,6 +369,7 @@ function BottomPanels({ market, setSelected, setTab }) {
 // ================= ROOT =================
 
 export default function TransfersScreen({ setActive }) {
+  const { careerSquad: rosterPlayers } = useDatabase();
   const { market, signings } = useTransfersData();
   const [tab, setTab] = useState("Market");
   const [selected, setSelected] = useState(market[0]);

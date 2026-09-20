@@ -1,0 +1,15 @@
+{
+  "base_project": "FAMILY26_match_engine_realism_v1.zip",
+  "changes": [
+    5,
+    6,
+    7
+  ],
+  "modules": [
+    "src/components/MatchUIRebuilt.jsx",
+    "src/engine/tacticalMatchAdapter.js",
+    "src/engine/playerIntelligence.js",
+    "src/engine/vector51Adapter.js"
+  ],
+  "note": "Modules are added as integration-ready components; existing project APIs are preserved."
+}

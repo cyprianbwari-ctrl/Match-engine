@@ -1,204 +1,193 @@
-import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react';
 import * as D from '../data/competitionData.js';
-import { buildXI, buildOpponentPool, initMatch, simulateInstant } from '../engine/matchSimulator.js';
+import { buildOpponentPool, buildXI, initMatch, simulateInstant } from '../engine/FAMILY26MatchEngine.js';
 import { FORMATIONS } from '../tactics/formations.js';
+import { getMatchSeed } from '../engine/simulationSeeds.js';
+import { getCareerSeed } from '../engine/careerSeedStore.js';
+import { useManagerData } from './ManagerContext.jsx';
+import { useDatabase } from './DatabaseContext.jsx';
+import { getCareerClubId, getCareerClubName } from '../engine/clubIdentity.js';
+import { normalizeActiveLeagues, canGenerateCareerMatch } from '../engine/activeLeaguePolicy.js';
+import { buildCompetitionWorld, applyFixtureResult, nextFixtureForClub, fixturesForRound, isSeasonComplete } from '../engine/worldCompetitionScheduler.js';
+import { resolveSeasonOutcome, findAdjacentDivision } from '../engine/seasonOutcome.js';
 
 const CompCtx = createContext(null);
 
-const UPCOMING_OPPONENTS = ['Man City', 'Newcastle', 'West Ham', 'Wolves', 'Brighton', 'Fulham', 'Everton', 'Crystal Palace', 'Brentford', 'Nottingham Forest', 'Leeds United', 'Burnley', 'Sunderland', 'Aston Villa'];
-let fixtureCursor = 0;
-
-function recomputePositions(table) {
-  return [...table].sort((a, b) => b.pts - a.pts || b.gd - a.gd).map((row, i) => ({ ...row, pos: i + 1 }));
-}
-
-function simulateGenericFixture(clubA, clubB) {
-  const strengthA = 55 + Math.round(clubA.pts / 2);
-  const strengthB = 55 + Math.round(clubB.pts / 2);
+function simulateFixture(fixture, table, competitionName) {
+  const home = table.find(r => String(r.clubId) === String(fixture.homeId));
+  const away = table.find(r => String(r.clubId) === String(fixture.awayId));
+  if (!home || !away) return { homeGoals: 0, awayGoals: 0 };
+  const strengthA = 55 + Math.round(home.pts / 2) + Math.round(home.gf / Math.max(1, home.p));
+  const strengthB = 55 + Math.round(away.pts / 2) + Math.round(away.gf / Math.max(1, away.p));
   const slots = FORMATIONS['4-3-3'];
-  const poolA = buildOpponentPool(strengthA, slots, clubA.club);
-  const poolB = buildOpponentPool(strengthB, slots, clubB.club);
-  const homeXI = buildXI(slots.map((slot, i) => ({ slot, player: poolA[i] })), 'home');
-  const awayXI = buildXI(slots.map((slot, i) => ({ slot, player: poolB[i] })), 'away');
+  const poolA = buildOpponentPool(strengthA, slots, home.club);
+  const poolB = buildOpponentPool(strengthB, slots, away.club);
+  const homeXI = buildXI(slots.map((slot,i)=>({slot,player:poolA[i]})), 'home');
+  const awayXI = buildXI(slots.map((slot,i)=>({slot,player:poolB[i]})), 'away');
   const result = simulateInstant(initMatch({
-    homeXI, awayXI, homeName: clubA.club, awayName: clubB.club,
-    homeTactics: { mentality: 'Balanced', tempo: 55, defensiveLine: 55, pressing: { intensity: 55 } },
-    awayTactics: { mentality: 'Balanced', tempo: 55, defensiveLine: 55, pressing: { intensity: 55 } },
+    homeXI, awayXI, homeName:home.club, awayName:away.club,
+    homeTactics:{mentality:'Balanced',tempo:55,defensiveLine:55,pressing:{intensity:55}},
+    awayTactics:{mentality:'Balanced',tempo:55,defensiveLine:55,pressing:{intensity:55}},
+    matchSeed:getMatchSeed(getCareerSeed(), fixture.date, home.club, away.club, competitionName),
   }));
-  return { homeGoals: result.score.home, awayGoals: result.score.away };
+  return { homeGoals:result.score.home, awayGoals:result.score.away };
 }
 
-function applyResult(table, clubName, gf, ga) {
-  return table.map(row => {
-    if (row.club !== clubName) return row;
-    const w = gf > ga ? 1 : 0, l = gf < ga ? 1 : 0, d = gf === ga ? 1 : 0;
-    return { ...row, p: row.p + 1, w: row.w + w, d: row.d + d, l: row.l + l, gd: row.gd + (gf - ga), pts: row.pts + (w ? 3 : d ? 1 : 0) };
-  });
-}
-
-// Every field the UI reads is derived here, once, from the same seed data —
-// so Overview / League / Cups / Continental / History never disagree.
 export function CompetitionProvider({ children }) {
-  const [leagueTable, setLeagueTable] = useState(D.leagueTable);
-  const [leagueFixtures, setLeagueFixtures] = useState(D.leagueFixtures);
-  const [leagueResults, setLeagueResults] = useState(D.leagueResults);
-
-  // Resolve today's fixture (and a handful of other Premier League fixtures)
-  // using the real match engine's Instant Result logic, then update the
-  // table. Used both when the user's match auto-resolves in the background
-  // and to keep the rest of the league moving alongside them.
-  const simulateMatchday = useCallback(() => {
-    const fixture = leagueFixtures[0];
-    if (!fixture) return null;
-    const us = leagueTable.find(r => r.us);
-    const oppName = fixture.home === 'Man Utd' ? fixture.away : fixture.home;
-    const opp = leagueTable.find(r => r.club === oppName) || leagueTable.find(r => !r.us);
-    const { homeGoals, awayGoals } = simulateGenericFixture(
-      fixture.home === 'Man Utd' ? us : opp, fixture.away === 'Man Utd' ? us : opp,
-    );
-    let table = applyResult(leagueTable, fixture.home, homeGoals, awayGoals);
-    table = applyResult(table, fixture.away, awayGoals, homeGoals);
-
-    // A handful of other fixtures elsewhere in the division, so the table
-    // keeps moving even when it isn't our matchday focus.
-    const others = table.filter(r => r.club !== fixture.home && r.club !== fixture.away);
-    for (let i = 0; i + 1 < others.length; i += 2) {
-      const a = others[i], b = others[i + 1];
-      const { homeGoals: hg, awayGoals: ag } = simulateGenericFixture(a, b);
-      table = applyResult(table, a.club, hg, ag);
-      table = applyResult(table, b.club, ag, hg);
+  const manager = useManagerData();
+  const db = useDatabase();
+  const currentClubId = getCareerClubId(manager.profile, db);
+  const currentClubName = getCareerClubName(manager.profile, db);
+  const activeLeagues = normalizeActiveLeagues(manager.profile?.activeLeagues || []);
+  const leagueOverride = manager.profile?.leagueOverride || null;
+  // The club object as it actually competes this season: same real club,
+  // but with its leagueId swapped to wherever promotion/relegation has
+  // moved it, since the database's own leagueId is a fixed real-world
+  // snapshot and can't reflect an in-career division change on its own.
+  const currentClub = useMemo(() => {
+    const base = (db.clubs || []).find(c => String(c.id) === String(currentClubId) || String(c.uid) === String(currentClubId));
+    if (!base) return null;
+    if (leagueOverride && String(leagueOverride.clubUid) === String(base.uid)) {
+      return { ...base, leagueId: leagueOverride.leagueId };
     }
-    table = recomputePositions(table);
-    setLeagueTable(table);
+    return base;
+  }, [db.clubs, currentClubId, leagueOverride]);
+  const [seasonIndex, setSeasonIndex] = useState(0);
+  const [world, setWorld] = useState(() => buildCompetitionWorld({ db, activeCountries:activeLeagues, currentClubId, currentClub, seasonIndex }));
 
-    const score = `${homeGoals} - ${awayGoals}`;
-    setLeagueResults(rs => [{ comp: 'Premier League', date: fixture.date === 'Today' ? 'Today' : fixture.date, home: fixture.home, away: fixture.away, score }, ...rs].slice(0, 10));
+  useEffect(() => {
+    setWorld(buildCompetitionWorld({ db, activeCountries:activeLeagues, currentClubId, currentClub, seasonIndex }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db.loading, db.clubs.length, db.competitions.length, db.nations.length, currentClubId, activeLeagues.join('|'), leagueOverride?.leagueId, seasonIndex]);
 
-    const nextOpp = UPCOMING_OPPONENTS[fixtureCursor % UPCOMING_OPPONENTS.length];
-    fixtureCursor++;
-    const atHome = fixtureCursor % 2 === 0;
-    setLeagueFixtures(fs => [...fs.slice(1), {
-      comp: 'Premier League', date: `In ${7 + (fixtureCursor % 3)} days`, time: '15:00',
-      home: atHome ? 'Man Utd' : nextOpp, away: atHome ? nextOpp : 'Man Utd',
-    }]);
+  const activeState = useMemo(() => {
+    const states = Object.values(world);
+    // Prefer the competition that actually contains the career club's next
+    // fixture. The `us` table marker is useful too, but the fixture check is
+    // the stronger invariant for match generation and survives imported/old
+    // table state where the marker may not have been set yet.
+    return states.find(s => nextFixtureForClub(s, currentClubId))
+      || states.find(s => s.table.some(r => r.us))
+      || states.find(s => String(s.competition.country || '').toLowerCase() === String(activeLeagues[0] || '').toLowerCase())
+      || states[0] || null;
+  }, [world, activeLeagues]);
 
-    return { home: fixture.home, away: fixture.away, homeGoals, awayGoals, usWon: (fixture.home === 'Man Utd' ? homeGoals > awayGoals : awayGoals > homeGoals) };
-  }, [leagueTable, leagueFixtures]);
+  const fallbackLeague = useMemo(() => ({
+    name:'Premier League', table:D.leagueTable.map(r=>({...r, us:r.club===currentClubName})),
+    fixtures:D.leagueFixtures.map(f=>({...f,home:f.home==='Newcastle'?currentClubName:f.home,away:f.away==='Newcastle'?currentClubName:f.away})),
+    results:D.leagueResults, topScorers:D.topScorers, topAssists:D.topAssists, teamStats:D.teamStats,
+    playerStats:D.playerLeagueStats, objectives:D.leagueObjectives,
+  }), [currentClubName]);
 
-  // Called when the user actually watches their match live in the Match
-  // Engine, so a watched result feeds back into the same persistent table
-  // rather than only background-simulated ones counting.
+  const league = useMemo(() => {
+    if (!activeState) return fallbackLeague;
+    const us = activeState.table.find(r=>r.us);
+    // The first fixture in the scheduler is not necessarily our fixture — it
+    // is simply the first match in the round-robin array. The career UI must
+    // always make the user's own next fixture the authoritative `fixtures[0]`
+    // because Home, Matchday and Match all consume that slot.
+    const scheduled = activeState.fixtures.filter(f=>f.status==='scheduled');
+    const userFixture = nextFixtureForClub(activeState, currentClubId);
+    const orderedFixtures = userFixture
+      ? [userFixture, ...scheduled.filter(f=>f.id !== userFixture.id)].slice(0, 12)
+      : scheduled.slice(0, 12);
+    const fixtures = orderedFixtures.map(f => ({ ...f, comp: f.competition || activeState.competition.name }));
+    const results = activeState.results.slice(0, 20).map(f=>({comp:activeState.competition.name,date:f.date,home:f.home,away:f.away,score:f.result?.score||'0 - 0'}));
+    const gf = us?.gf || 0, ga = us?.ga || 0;
+    const teamStats = {...D.teamStats, goalsFor:gf, goalsAgainst:ga, matchesPlayed:us?.p||0};
+    return {
+      name:activeState.competition.name, table:activeState.table, fixtures, results,
+      topScorers:D.topScorers, topAssists:D.topAssists, teamStats, playerStats:D.playerLeagueStats,
+      objectives:D.leagueObjectives.map(o=>({...o, label:o.label.replace(/Premier League/g, activeState.competition.name)})),
+      competitionId:activeState.competition.id, country:activeState.competition.country, season:activeState.season,
+    };
+  }, [activeState, fallbackLeague]);
+
+  const simulateMatchday = useCallback(() => {
+    if (!activeState || !canGenerateCareerMatch(activeState.competition.country, activeLeagues)) return null;
+    const userFixture = nextFixtureForClub(activeState, currentClubId) || fixturesForRound(activeState, activeState.currentRound)[0];
+    if (!userFixture) return null;
+    const updates = {};
+    let userResult = null;
+    Object.values(world).forEach(state => {
+      const roundFixtures = fixturesForRound(state, state.currentRound).filter(f=>f.status==='scheduled');
+      let nextState = state;
+      roundFixtures.forEach(f => {
+        const r = simulateFixture(f, nextState.table, nextState.competition.name);
+        nextState = applyFixtureResult(nextState, f.id, r.homeGoals, r.awayGoals);
+        if (state.key === activeState.key && f.id === userFixture.id) userResult = {...f,...r};
+      });
+      if (roundFixtures.length) updates[state.key] = nextState;
+    });
+    setWorld(prev=>({...prev,...updates}));
+    if (!userResult) return null;
+    return { home:userResult.home, away:userResult.away, homeGoals:userResult.homeGoals, awayGoals:userResult.awayGoals,
+      usWon:String(userResult.homeId)===String(currentClubId)?userResult.homeGoals>userResult.awayGoals:userResult.awayGoals>userResult.homeGoals,
+      competition:activeState.competition.name, fixtureId:userResult.id };
+  }, [activeState, activeLeagues, currentClubId, world]);
+
   const recordUserMatchResult = useCallback((homeGoals, awayGoals) => {
-    const fixture = leagueFixtures[0];
+    if (!activeState) return;
+    const fixture = nextFixtureForClub(activeState, currentClubId);
     if (!fixture) return;
-    let table = applyResult(leagueTable, fixture.home, homeGoals, awayGoals);
-    table = applyResult(table, fixture.away, awayGoals, homeGoals);
-    table = recomputePositions(table);
-    setLeagueTable(table);
-    setLeagueResults(rs => [{ comp: 'Premier League', date: 'Today', home: fixture.home, away: fixture.away, score: `${homeGoals} - ${awayGoals}` }, ...rs].slice(0, 10));
-    const nextOpp = UPCOMING_OPPONENTS[fixtureCursor % UPCOMING_OPPONENTS.length];
-    fixtureCursor++;
-    const atHome = fixtureCursor % 2 === 0;
-    setLeagueFixtures(fs => [...fs.slice(1), {
-      comp: 'Premier League', date: `In ${7 + (fixtureCursor % 3)} days`, time: '15:00',
-      home: atHome ? 'Man Utd' : nextOpp, away: atHome ? nextOpp : 'Man Utd',
-    }]);
-  }, [leagueTable, leagueFixtures]);
+    const nextState = applyFixtureResult(activeState, fixture.id, Number(homeGoals)||0, Number(awayGoals)||0);
+    setWorld(prev=>({...prev,[nextState.key]:nextState}));
+  }, [activeState, currentClubId]);
+
+  const seasonComplete = useMemo(() => isSeasonComplete(activeState), [activeState]);
+
+  const seasonOutcome = useMemo(() => {
+    if (!seasonComplete || !activeState || !currentClub) return null;
+    return resolveSeasonOutcome({
+      table: activeState.table,
+      divisionLevel: activeState.competition.level ?? 0,
+      clubId: currentClub.id,
+      careerSeed: manager.profile.careerSeed,
+      season: activeState.season,
+    });
+  }, [seasonComplete, activeState, currentClub, manager.profile.careerSeed]);
+
+  const advanceSeason = useCallback(() => {
+    if (!seasonOutcome || !activeState) return null;
+    if (seasonOutcome.direction !== 0) {
+      // The adjacent-division search needs every level of this country, not
+      // just the ones currently active as world states, so re-derive from
+      // the full competitions list rather than only what's already built.
+      const countryComps = (db.competitions || []).filter(c => String(c.nationId) === String(activeState.competition.nationId));
+      const next = findAdjacentDivision(countryComps, activeState.competition, seasonOutcome.direction);
+      if (next) {
+        manager.updateProfile({
+          leagueOverride: { clubUid: currentClub.uid, leagueId: next.competitionId ?? next.uid ?? next.id },
+        });
+      }
+    }
+    setSeasonIndex(i => i + 1);
+    return seasonOutcome;
+  }, [seasonOutcome, activeState, world, db.competitions, currentClub, manager]);
+
+  const cups = useMemo(()=>D.cups,[]);
+  const continental = useMemo(()=>D.continental,[]);
+  const history = useMemo(()=>({previousSeasons:D.previousSeasons,trophyCabinet:D.trophyCabinet,clubRecords:D.clubRecords,notableAchievements:D.notableAchievements,historicalStats:D.historicalStats}),[]);
 
   const value = useMemo(() => {
-    const league = {
-      table: leagueTable,
-      results: leagueResults,
-      fixtures: leagueFixtures,
-      topScorers: D.topScorers,
-      topAssists: D.topAssists,
-      teamStats: D.teamStats,
-      playerStats: D.playerLeagueStats,
-      objectives: D.leagueObjectives,
-    };
-    const cups = D.cups;
-    const continental = D.continental;
-    const history = {
-      previousSeasons: D.previousSeasons,
-      trophyCabinet: D.trophyCabinet,
-      clubRecords: D.clubRecords,
-      notableAchievements: D.notableAchievements,
-      historicalStats: D.historicalStats,
-    };
-
-    const usRow = league.table.find(r => r.us);
-    const continentalList = Object.values(continental);
-
-    // Cross-competition views for the Overview tab.
+    const usRow = league.table.find(r=>r.us) || league.table[0] || {pos:1,pts:0,p:0};
     const activeCompetitions = [
-      { key: 'league', name: 'Premier League', status: `${usRow.pos === 1 ? '1st' : usRow.pos + getOrdinal(usRow.pos)} place`, progress: `${usRow.pts} pts from ${usRow.p} games`, color: '#8a6bff' },
-      { key: 'cups', sub: 'faCup', name: cups.faCup.name, status: cups.faCup.currentRound, progress: `Next: ${cups.faCup.nextOpponent}`, color: cups.faCup.color },
-      { key: 'cups', sub: 'leagueCup', name: cups.leagueCup.name, status: cups.leagueCup.currentRound, progress: cups.leagueCup.draw, color: cups.leagueCup.color },
-      { key: 'continental', sub: 'ucl', name: continental.ucl.name, status: continental.ucl.phase, progress: `1st in league phase, ${continental.ucl.table[0].pts} pts`, color: continental.ucl.color },
-      { key: 'continental', sub: 'uel', name: continental.uel.name, status: continental.uel.phase, progress: `1st in league phase, ${continental.uel.table[0].pts} pts`, color: continental.uel.color },
-      { key: 'continental', sub: 'uecl', name: continental.uecl.name, status: continental.uecl.phase, progress: `vs ${continental.uecl.tie.opponent}`, color: continental.uecl.color },
+      {key:'league',name:league.name,status:`${usRow.pos===1?'1st':usRow.pos+getOrdinal(usRow.pos)} place`,progress:`${usRow.pts} pts from ${usRow.p} games`,color:'#8a6bff'},
+      {key:'cups',sub:'faCup',name:cups.faCup.name,status:cups.faCup.currentRound,progress:`Next: ${cups.faCup.nextOpponent}`,color:cups.faCup.color},
+      {key:'cups',sub:'leagueCup',name:cups.leagueCup.name,status:cups.leagueCup.currentRound,progress:cups.leagueCup.draw,color:cups.leagueCup.color},
+      {key:'continental',sub:'ucl',name:continental.ucl.name,status:continental.ucl.phase,progress:`1st in league phase, ${continental.ucl.table[0].pts} pts`,color:continental.ucl.color},
     ];
-
-    const allResults = [
-      ...league.results.map(r => ({ ...r })),
-      { comp: cups.faCup.name, date: '8 Dec 2025', home: 'Man Utd', away: cups.faCup.previousRounds[0].opponent, score: cups.faCup.previousRounds[0].score },
-      { comp: cups.leagueCup.name, date: '17 Dec 2025', home: 'Newcastle', away: 'Man Utd', score: '1 - 2' },
-      { comp: continental.ucl.name, date: '26 Nov 2025', home: 'Man Utd', away: 'Inter Milan', score: '2 - 1' },
-      { comp: continental.uel.name, date: '28 Nov 2025', home: 'Braga', away: 'Man Utd', score: '1 - 2' },
-    ];
-    allResults.sort((a, b) => new Date(b.date) - new Date(a.date) || 0);
-    const allResultsTop = allResults.slice(0, 5);
-
-    const allFixtures = [
-      ...league.fixtures,
-      { comp: cups.faCup.name, date: 'Sun, 4 Jan', time: '14:00', home: 'Bournemouth', away: 'Man Utd' },
-      { comp: continental.ucl.name, date: 'Tue, 16 Dec', time: '20:00', home: 'Man Utd', away: 'Bayern Munich' },
-      { comp: continental.uel.name, date: 'Thu, 18 Dec', time: '18:45', home: 'Man Utd', away: 'Roma' },
-    ].slice(0, 6);
-
-    const form = [...league.results].slice(0, 5).reverse().map(r => {
-      const usHome = r.home === 'Man Utd';
-      const [hs, as] = r.score.split(' - ').map(Number);
-      const usGoals = usHome ? hs : as, oppGoals = usHome ? as : hs;
-      return usGoals > oppGoals ? 'W' : usGoals < oppGoals ? 'L' : 'D';
-    });
-
-    const keyStats = {
-      goalsScored: league.teamStats.goalsFor + cups.faCup.stats.goalsFor + cups.leagueCup.stats.goalsFor + continental.ucl.stats.goalsFor + continental.uel.stats.goalsFor,
-      goalsConceded: league.teamStats.goalsAgainst + cups.faCup.stats.goalsAgainst + cups.leagueCup.stats.goalsAgainst + continental.ucl.stats.goalsAgainst + continental.uel.stats.goalsAgainst,
-      unbeatenRun: 9,
-      winRate: 71,
-    };
-
-    const objectives = [
-      ...league.objectives.map(o => ({ ...o, comp: 'Premier League' })),
-      { label: 'Win a domestic cup', status: 'On Track', detail: `${cups.faCup.name} & ${cups.leagueCup.name} still alive`, comp: 'Cups' },
-      { label: 'Reach the Champions League knockout rounds', status: 'On Track', detail: '1st in league phase', comp: 'Continental' },
-    ];
-
-    return {
-      league, cups, continental, continentalList, history, activeCompetitions, allResults: allResultsTop, allFixtures, form, keyStats, objectives,
-      simulateMatchday, recordUserMatchResult,
-      getSnapshot: () => ({ leagueTable, leagueFixtures, leagueResults }),
-      restoreSnapshot: (s) => {
-        if (!s) return;
-        if (s.leagueTable) setLeagueTable(s.leagueTable);
-        if (s.leagueFixtures) setLeagueFixtures(s.leagueFixtures);
-        if (s.leagueResults) setLeagueResults(s.leagueResults);
-      },
-    };
-  }, [leagueTable, leagueFixtures, leagueResults, simulateMatchday, recordUserMatchResult]);
+    const allResults = [...league.results.map(r=>({...r})), ...cups.faCup.previousRounds.map(r=>({comp:cups.faCup.name,date:'8 Dec 2025',home:currentClubName,away:r.opponent,score:r.score}))].slice(0,8);
+    const allFixtures = [...league.fixtures, {comp:cups.faCup.name,date:'Sun, 4 Jan',time:'14:00',home:'Bournemouth',away:currentClubName}].slice(0,8);
+    const form = league.results.slice(0,5).reverse().map(r=>{const [hs,as]=r.score.split(' - ').map(Number);const home=r.home===currentClubName;const u=home?hs:as,o=home?as:hs;return u>o?'W':u<o?'L':'D';});
+    const keyStats = {goalsScored:league.teamStats.goalsFor||0,goalsConceded:league.teamStats.goalsAgainst||0,unbeatenRun:9,winRate:71};
+    const objectives = [...(league.objectives||[]),{label:'Win a domestic cup',status:'On Track',detail:`${cups.faCup.name} & ${cups.leagueCup.name} still alive`,comp:'Cups'}];
+    return {league,cups,continental,continentalList:Object.values(continental),history,activeCompetitions,allResults,allFixtures,form,keyStats,objectives,worldCompetitions:Object.values(world),simulateMatchday,recordUserMatchResult,
+      seasonComplete,seasonOutcome,advanceSeason,divisionLevel:activeState?.competition?.level??0,
+      getSnapshot:()=>({world,seasonIndex}),restoreSnapshot:(s)=>{if(s?.world)setWorld(s.world); if(s?.seasonIndex!==undefined)setSeasonIndex(s.seasonIndex); else if(s?.leagueTable){ /* legacy save migration */ }}};
+  }, [league,cups,continental,history,currentClubName,world,simulateMatchday,recordUserMatchResult,seasonComplete,seasonOutcome,advanceSeason,activeState,seasonIndex]);
 
   return <CompCtx.Provider value={value}>{children}</CompCtx.Provider>;
 }
-
-function getOrdinal(n) {
-  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
-  return s[(v - 20) % 10] || s[v] || s[0];
-}
-
-export function useCompetitionData() {
-  const ctx = useContext(CompCtx);
-  if (!ctx) throw new Error('useCompetitionData must be used within a CompetitionProvider');
-  return ctx;
-}
+function getOrdinal(n){const s=['th','st','nd','rd'],v=n%100;return s[(v-20)%10]||s[v]||s[0];}
+export function useCompetitionData(){const ctx=useContext(CompCtx);if(!ctx)throw new Error('useCompetitionData must be used within a CompetitionProvider');return ctx;}

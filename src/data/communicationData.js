@@ -11,7 +11,7 @@ export const TAG_COLORS = {
 
 export const initialInboxMessages = [
   {
-    id: 1, sender: 'Bruno Fernandes', kind: 'player', tag: 'Player', time: '09:42', date: 'Today', unread: true,
+    id: 1, sender: 'Rafael Teixeira', kind: 'player', tag: 'Player', time: '09:42', date: 'Today', unread: true,
     subject: 'Request for more playtime',
     preview: 'I would like to discuss my role in the team and my game time going forward.',
     body: 'Gaffer, I wanted to talk about my role in the squad. I feel I can offer more if I get consistent minutes in my preferred position. Can we find time to discuss this?',
@@ -26,15 +26,15 @@ export const initialInboxMessages = [
   },
   {
     id: 3, sender: 'FC Barcelona', kind: 'club', tag: 'Transfer', time: 'Yesterday', date: 'Yesterday', unread: true,
-    subject: 'Transfer offer for Alejandro Garnacho',
-    preview: 'Barcelona have submitted a bid of €70M for Alejandro Garnacho.',
-    body: 'FC Barcelona have formally submitted an offer of €70,000,000 plus add-ons for Alejandro Garnacho. They are requesting a response within 7 days.',
+    subject: 'Transfer offer for Mateo Villanueva',
+    preview: 'Barcelona have submitted a bid of €70M for Mateo Villanueva.',
+    body: 'FC Barcelona have formally submitted an offer of €70,000,000 plus add-ons for Mateo Villanueva. They are requesting a response within 7 days.',
     actions: ['Accept', 'Reject', 'View Transfer'], link: { screen: 'Transfers' },
   },
   {
     id: 4, sender: 'Club Doctor', kind: 'medical', tag: 'Medical', time: 'Yesterday', date: 'Yesterday', unread: true,
-    subject: 'Injury update – Lisandro Martínez',
-    preview: 'Lisandro Martínez is expected to be out for 2–3 weeks with a knee issue.',
+    subject: 'Injury update – Nahuel Ibarra',
+    preview: 'Nahuel Ibarra is expected to be out for 2–3 weeks with a knee issue.',
     body: 'Scan results confirm a minor knee ligament strain. Expected return: 2–3 weeks. Recommend light individual training only for now.',
     actions: ['View Player', 'View Staff'], link: { screen: 'Staff' },
   },
@@ -69,7 +69,7 @@ export const initialInboxMessages = [
   {
     id: 9, sender: 'Youth Team', kind: 'youth', tag: 'Youth', time: '10 Dec', date: '10 Dec', unread: false,
     subject: 'U18 match result',
-    preview: 'Manchester United U18 2 - 1 Aston Villa U18.',
+    preview: 'Newcastle United U18 2 - 1 Aston Villa U18.',
     body: 'A strong performance from the youth side, with two second-half goals sealing the win. Several players caught the eye of the academy staff.',
     actions: ['View Staff'], link: { screen: 'Staff', tab: 'coaching' },
   },
@@ -99,7 +99,7 @@ export const calendarEventsByDay = {
     { time: '09:30', title: 'Board Call – Budget Review', place: 'Remote', tag: 'Board', icon: 'users' },
   ],
   '18-wed': [
-    { time: '15:00', title: 'Contract Meeting – Rashford', place: 'Carrington', tag: 'Contracts', icon: 'file' },
+    { time: '15:00', title: 'Contract Meeting – Okafor', place: 'Carrington', tag: 'Contracts', icon: 'file' },
   ],
   '19-thu': [],
   '20-fri': [
@@ -109,15 +109,15 @@ export const calendarEventsByDay = {
 
 export const newsItems = [
   {
-    id: 'n1', category: 'Club News', bucket: 'Club News', time: '2 hours ago', crest: 'Man Utd',
-    headline: 'Amad Diallo wins Player of the Month',
-    body: 'Amad Diallo has been named Manchester United Player of the Month for November, following a string of impressive performances.',
+    id: 'n1', category: 'Club News', bucket: 'Club News', time: '2 hours ago', crest: 'Newcastle',
+    headline: 'Ibrahim Koné wins Player of the Month',
+    body: 'Ibrahim Koné has been named Newcastle United Player of the Month for November, following a string of impressive performances.',
     link: { screen: 'Squad' },
   },
   {
     id: 'n2', category: 'Transfer News', bucket: 'Club News', time: '4 hours ago', crest: 'Real Madrid',
-    headline: 'Real Madrid interested in Mainoo',
-    body: 'Reports suggest Real Madrid have made contact with Manchester United over a potential deal for Kobbie Mainoo.',
+    headline: 'Real Madrid interested in Osei',
+    body: 'Reports suggest Real Madrid have made contact with Newcastle United over a potential deal for Tyrell Osei.',
     link: { screen: 'Transfers' },
   },
   {
@@ -127,15 +127,15 @@ export const newsItems = [
     link: { screen: 'Scouting' },
   },
   {
-    id: 'n4', category: 'Media', bucket: 'Media', time: '8 hours ago', crest: 'Man Utd', tweet: true, handle: '@ManUtd_Rashford', engagement: { likes: '12.4k', retweets: '2.1k', replies: '890' },
-    headline: 'Rashford speaks about his future',
-    body: 'Marcus Rashford has hinted that he is happy at Manchester United and wants to remain at the club long-term.',
+    id: 'n4', category: 'Media', bucket: 'Media', time: '8 hours ago', crest: 'Newcastle', tweet: true, handle: '@NUFC_Okafor', engagement: { likes: '12.4k', retweets: '2.1k', replies: '890' },
+    headline: 'Okafor speaks about his future',
+    body: 'Jayden Okafor has hinted that he is happy at Newcastle United and wants to remain at the club long-term.',
     link: { screen: 'Squad' },
   },
   {
     id: 'n5', category: 'Competition', bucket: 'Club News', time: '10 hours ago', crest: 'UCL',
     headline: 'Champions League: Group stage draw',
-    body: 'Manchester United have been drawn in Group A alongside Bayern Munich, Inter Milan and Galatasaray.',
+    body: 'Newcastle United have been drawn in Group A alongside Bayern Munich, Inter Milan and Galatasaray.',
     link: { screen: 'Competitions', tab: 'continental' },
   },
   {

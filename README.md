@@ -31,3 +31,14 @@ npm run preview
 ```
 
 This uses Vite + React; Vite's current documentation recommends `npm create vite@latest` for scaffolding and supports React/JSX directly.
+
+## 3D Player Renderer v3
+The match window now renders the players through a dependency-free WebGL layer with volumetric geometry, lighting, depth, player-specific proportions and action-driven animation poses. The DOM layer is retained only for click targets and selected-player labels.
+
+
+## Injected men's database
+This build includes the FAMILY26_mens_only decoded export under `public/database/` and loads it at runtime as the authoritative database. The database contains players, clubs, competitions, stadiums, club-squad links, nations, and starting-contract raw records.
+
+
+## Deterministic simulation
+Gameplay randomness uses a persisted career seed and derived day/match seeds. `Math.random()` has been removed from gameplay code so the same career state and match seed can be replayed reproducibly. See `FAMILY26_DETERMINISTIC_RNG.md`.

@@ -137,7 +137,7 @@ function CalendarPanel({ goTo, setTab }) {
 // ================= NEWS / MESSAGES =================
 
 const NEWS_CAT_COLOR = { 'Club News': '#ff8a5c', 'Transfer News': '#3ddc84', 'Football News': '#4da6ff', 'Media': '#b06bff', 'Competition': '#3ddc84', 'Fans': '#3ddc84' };
-const NEWS_CREST_COLOR = { 'Man Utd': '#DA291C', 'Real Madrid': '#FEBE10', 'Man City': '#6CABDD', 'UCL': '#1a1a2e', 'Fans': '#3a4570' };
+const NEWS_CREST_COLOR = { 'Newcastle': '#000000', 'Real Madrid': '#FEBE10', 'Man City': '#6CABDD', 'UCL': '#1a1a2e', 'Fans': '#3a4570' };
 
 function NewsCrest({ name }) {
   if (name === 'UCL') return <span className="news-crest" style={{ background: 'linear-gradient(150deg,#2a2a55,#0a0e22)' }}><Trophy size={18} color="#c9d3f0" /></span>;

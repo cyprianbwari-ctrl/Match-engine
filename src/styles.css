@@ -37,3 +37,27 @@
 .recovery-actions button{flex:1;height:44px;border-radius:9px;font-weight:800;font-size:12.5px;cursor:pointer;border:1px solid #38436f}
 .recovery-discard{background:#10163a;color:#c4cbe6}
 .recovery-recover{background:#68ff2e;border-color:#68ff2e;color:#06210a}
+
+/* FAMILY 26 — 4-8 quality layer */
+:root { --fm-purple:#8a6bff; --fm-lime:#b8ff45; --fm-panel:rgba(13,18,39,.94); --fm-border:rgba(151,166,218,.16); }
+button, input, select { -webkit-tap-highlight-color: transparent; }
+button { transition: transform .12s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+button:hover:not(:disabled) { transform: translateY(-1px); }
+button:active:not(:disabled) { transform: translateY(0); }
+input:focus, select:focus { outline: 2px solid rgba(138,107,255,.42); outline-offset: 1px; }
+.sidebar button.active { box-shadow: inset 3px 0 0 var(--fm-lime), 0 0 18px rgba(138,107,255,.08); }
+.topbar, .sidebar, .card, .panel, .comp-card, .finance-card, .tr-card { backdrop-filter: blur(12px); }
+@media (max-width: 900px) {
+  .topbar { gap:8px; }
+  .competition-head, .date-block { display:none; }
+}
+@media (max-width: 680px) {
+  .sidebar:not(.collapsed) { width:230px; }
+  .club-head { display:none; }
+  .topbar .continue small { display:none; }
+}
+
+.career-pulse{position:fixed;right:12px;bottom:10px;z-index:80;display:flex;gap:8px;padding:7px 10px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(9,12,22,.9);font:600 11px/1 system-ui;color:#bfc6d8;backdrop-filter:blur(8px)}.career-pulse span:first-child{color:#8fff63}.career-pulse span{white-space:nowrap}
+
+/* FAMILY 26 mobile-first owner pass */
+html,body,#root{min-height:100%;overflow-x:hidden}.app{min-height:100dvh;padding-bottom:env(safe-area-inset-bottom)}button,input,select{touch-action:manipulation}.sidebar button,.topbar button{min-height:40px}.main-disabled{overscroll-behavior:none}@media(max-width:700px){.topbar{padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right))}.sidebar{width:min(86vw,320px)}main{padding:10px 8px 18px}.page-grid,.dashboard-grid,.settings-page,.tac-page{max-width:100%;}.panel,.card,.settings-panel{border-radius:9px}.slogan{display:none}}@media(orientation:portrait) and (max-width:700px){.match-page .match-3d-stage{min-height:48vh}.match-page .match-command-dock{bottom:max(12px,env(safe-area-inset-bottom))}}

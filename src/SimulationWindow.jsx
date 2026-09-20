@@ -10,7 +10,14 @@ import { useTransfersData } from './store/TransfersContext.jsx';
 import { useCommunicationData } from './store/CommunicationContext.jsx';
 import { useFinanceData } from './store/FinanceContext.jsx';
 import { usePlayerState } from './store/PlayerStateContext.jsx';
-import { players as roster } from './data/roster.js';
+import { useDatabase } from './store/DatabaseContext.jsx';
+import { useManagerData } from './store/ManagerContext.jsx';
+import { createSeededRng, deriveSeed } from './engine/seededRng.js';
+import { getDaySeed } from './engine/simulationSeeds.js';
+import { getCareerSeed } from './engine/careerSeedStore.js';
+import { getCareerClubName } from './engine/clubIdentity.js';
+import { isLeagueActive, normalizeActiveLeagues } from './engine/activeLeaguePolicy.js';
+import { useTrainingData } from './store/TrainingContext.jsx';
 
 const DURATIONS = [
   ['day', 'Next Day', CalendarDays, 'Advance 1 day'],
@@ -26,12 +33,18 @@ const TICK_MS = 700;
 function shortName(club) { return club.length > 12 ? club.split(' ').map(w => w[0]).join('') : club; }
 
 export default function SimulationWindow({ goTo }) {
+  const db = useDatabase();
+  const { careerSquad: roster } = db;
   const sim = useSimulation();
+  const manager = useManagerData();
+  const currentClubName = getCareerClubName(manager.profile, db);
+  const activeLeagues = normalizeActiveLeagues(manager.profile?.activeLeagues || []);
   const { league, simulateMatchday } = useCompetitionData();
   const transfers = useTransfersData();
   const { addMessage, addNews } = useCommunicationData();
   const finance = useFinanceData();
   const playerState = usePlayerState();
+  const training = useTrainingData();
 
   const [mode, setMode] = useState(null); // null | 'day' | 'match' | 'week' | 'vacation'
   const [running, setRunning] = useState(false);
@@ -51,16 +64,18 @@ export default function SimulationWindow({ goTo }) {
   }
 
   function playOneRound() {
+    if (!isLeagueActive(league.country || activeLeagues[0], activeLeagues)) return;
     // Resolves the whole division's round via the real match engine
     // (CompetitionContext.simulateMatchday already builds real XIs and runs
     // the actual simulator for our fixture and a batch of others).
+    const dayRng = createSeededRng(getDaySeed(getCareerSeed(), Math.floor((sim.now.getTime() - new Date(2025, 8, 13).getTime()) / 86400000) + 1));
     const result = simulateMatchday();
     if (!result) return;
     const grouped = league.table
       .filter(r => r.club === result.home || r.club === result.away)
       .map(r => r.club);
     setLiveMatches(prev => [{
-      comp: 'Premier League', home: result.home, away: result.away,
+      comp: league.name, home: result.home, away: result.away,
       homeGoals: result.homeGoals, awayGoals: result.awayGoals,
     }, ...prev].slice(0, 12));
     logEvent({ type: 'goal', title: result.usWon ? 'FULL TIME — WIN' : 'FULL TIME', body: `${result.home} ${result.homeGoals} - ${result.awayGoals} ${result.away}` });
@@ -69,9 +84,9 @@ export default function SimulationWindow({ goTo }) {
     // This round included our own fixture — record matchday income exactly
     // like a manually-played match would, so vacations don't silently skip
     // real financial consequences.
-    const weAreHome = result.home === 'Man Utd';
+    const weAreHome = result.home === currentClubName;
     const won = result.usWon;
-    const base = weAreHome ? 2_400_000 + Math.round(Math.random() * 1_600_000) : 350_000 + Math.round(Math.random() * 250_000);
+    const base = weAreHome ? 2_400_000 + Math.round(dayRng() * 1_600_000) : 350_000 + Math.round(dayRng() * 250_000);
     finance.addTransaction(
       weAreHome ? `Matchday Revenue vs ${result.away}` : `Away Day Share — ${result.home}`,
       won ? Math.round(base * 1.15) : base, 'Matchday Revenue',
@@ -82,14 +97,14 @@ export default function SimulationWindow({ goTo }) {
     // Real decision source: an incoming transfer bid for one of our players
     // that hasn't been responded to yet.
     const pending = transfers.incomingOffers.find(o => o.status === 'Pending');
-    if (pending && Math.random() < 0.35) return { kind: 'offer', offer: pending };
+    if (pending && createSeededRng(deriveSeed('decision', getCareerSeed(), sim.now.toISOString(), pending.id))() < 0.35) return { kind: 'offer', offer: pending };
     return null;
   }
 
   function resolveDecisionAuto(d) {
     // Vacation mode: the assistant manager decides on your behalf.
     if (d.kind === 'offer') {
-      const accept = d.offer.fee > 40_000_000 || Math.random() < 0.4;
+      const accept = d.offer.fee > 40_000_000 || createSeededRng(deriveSeed('vacation-offer', getCareerSeed(), sim.now.toISOString(), d.offer.id))() < 0.4;
       transfers.respondIncoming(d.offer.id, accept ? 'accept' : 'reject');
       logEvent({ type: 'transfer', title: 'Assistant Manager', body: `${accept ? 'Accepted' : 'Rejected'} ${d.offer.fromClub}'s €${Math.round(d.offer.fee / 1e6)}M bid for ${d.offer.playerName}.` });
     }
@@ -104,9 +119,11 @@ export default function SimulationWindow({ goTo }) {
     // Player live-state recovery/injury-clearance ticks forward exactly
     // once per simulated day, keyed to the date the clock is advancing to.
     const newDate = new Date(prevDate); newDate.setDate(newDate.getDate() + 1);
+    const trainingSession = training.applyDayTraining(newDate.toDateString());
+    if (trainingSession) logEvent({ type:'info', title:'Training', body:`${trainingSession.type}: ${trainingSession.focus} · ${trainingSession.coach}` });
     const newlyInjured = playerState.advanceDay(newDate.toDateString());
     newlyInjured.forEach(inj => {
-      addNews({ category: 'Injury', bucket: 'Club News', crest: 'Man Utd', headline: `${inj.name} injured in training — ${inj.type}`, body: `Expected back around ${inj.expectedReturn}.` });
+      addNews({ category: 'Injury', bucket: 'Club News', crest: currentClubName, headline: `${inj.name} injured in training — ${inj.type}`, body: `Expected back around ${inj.expectedReturn}.` });
       logEvent({ type: 'info', title: 'Injury', body: `${inj.name} picks up a knock (${inj.type}).` });
     });
     if (prevDate && newDate.getMonth() !== prevDate.getMonth()) {
@@ -114,20 +131,21 @@ export default function SimulationWindow({ goTo }) {
       playerState.applyMonthlyDevelopment(monthLabel);
       const potm = playerState.recordPlayerOfMonthAward(monthLabel);
       if (potm) {
-        addNews({ category: 'Awards', bucket: 'Football News', crest: 'Man Utd', headline: `${potm.name} named Player of the Month`, body: `Averaged a ${potm.avgRating} rating in ${monthLabel.split(' ')[0]}.` });
+        addNews({ category: 'Awards', bucket: 'Football News', crest: currentClubName, headline: `${potm.name} named Player of the Month`, body: `Averaged a ${potm.avgRating} rating in ${monthLabel.split(' ')[0]}.` });
         logEvent({ type: 'info', title: 'Award', body: `${potm.name} wins Player of the Month.` });
       }
     }
 
     // Background world — routine club life continues every simulated day.
-    const routineRoll = Math.random();
+    const dayRng = createSeededRng(getDaySeed(getCareerSeed(), Math.floor((newDate.getTime() - new Date(2025, 8, 13).getTime()) / 86400000) + 1));
+    const routineRoll = dayRng();
     if (routineRoll > 0.7) {
       addMessage({ subject: 'Training Report', preview: 'First-team training completed — fitness levels trending upward.', tag: 'Staff', kind: 'staff', sender: 'Coaching Staff' });
       logEvent({ type: 'info', title: 'Training', body: 'First-team session completed at Carrington.' });
     }
     // AI managers actually making moves — a real, occasional consequence
     // in the wider transfer market, not just decorative news headlines.
-    if (Math.random() < 0.04) {
+    if (dayRng() < 0.04) {
       const moved = transfers.simulateAITransferActivity();
       if (moved) logEvent({ type: 'transfer', title: 'Transfer News', body: `${moved.name}: ${moved.from} → ${moved.to}.` });
     }
@@ -136,7 +154,7 @@ export default function SimulationWindow({ goTo }) {
     if (arrivingAtMatch) {
       if (mode === 'vacation') {
         playOneRound();
-        sim.setDaysUntilMatch(3 + Math.floor(Math.random() * 3));
+        sim.setDaysUntilMatch(3 + Math.floor(dayRng() * 3));
       } else {
         sim.setPhase('matchday');
         stopRun(true);
@@ -314,7 +332,7 @@ export default function SimulationWindow({ goTo }) {
         <div><Smile size={15} /><div><span>Team Morale</span><b>Good</b></div></div>
         <div><WalletCards size={15} /><div><span>Transfer Budget</span><b>{transfers.formatEURShort(transfers.budget.available)}</b></div></div>
         <div><Banknote size={15} /><div><span>Wage Budget (p/w)</span><b>£{transfers.budget.wageAvailable.toLocaleString()}</b></div></div>
-        <div><CalendarDays size={15} /><div><span>Next Match</span><b>{nextFixture ? (nextFixture.home === 'Man Utd' ? nextFixture.away : nextFixture.home) : '—'}</b></div></div>
+        <div><CalendarDays size={15} /><div><span>Next Match</span><b>{nextFixture ? (nextFixture.home === currentClubName ? nextFixture.away : nextFixture.home) : '—'}</b></div></div>
       </div>
 
       <div className="sim-footer">

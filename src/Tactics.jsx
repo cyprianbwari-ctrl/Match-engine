@@ -5,7 +5,8 @@ import {
   Link2, Plus, Trash2, Bot, TriangleAlert, ShieldAlert, UserCheck, Settings,
   Pencil, Flag, Map, Gauge, Filter, ArrowRightLeft,
 } from "lucide-react";
-import { players as roster, roles, duties, compat, fitTier } from "./data/roster.js";
+import { roles, duties, compat, fitTier } from "./data/tacticalDefinitions.js";
+import { useDatabase } from "./store/DatabaseContext.jsx";
 import { FORMATIONS, FORMATION_NAMES } from "./tactics/formations.js";
 import {
   MENTALITIES, IN_POSSESSION, TRANSITION, OUT_OF_POSSESSION,
@@ -32,12 +33,13 @@ const BUCKET_ORDER = ["GK", "DEF", "MID", "ATT"];
 const BUCKET_LABEL = { GK: "Goalkeepers", DEF: "Defenders", MID: "Midfielders", ATT: "Attackers" };
 const TEMPO_LABELS = ["Slow", "Normal", "Fast"];
 const WIDTH_LABELS = ["Narrow", "Balanced", "Wide"];
-const firstTeamPool = roster.filter(p => p.playTime !== "Youth");
 
 function labelFromValue(v) { return v <= 33 ? 0 : v <= 66 ? 1 : 2; }
 function valueFromLabelIndex(i) { return [20, 50, 85][i]; }
 
 export default function TacticsScreen({ setActive, initialTab, embedded }) {
+  const { careerSquad: roster } = useDatabase();
+  const firstTeamPool = useMemo(() => roster.filter(p => p.playTime !== "Youth"), [roster]);
   const {
     formation, setFormation, assignment, setAssignment, roleAssignment, setRoleAssignment,
     dutyAssignment, setDutyAssignment, playerInstructions, setPlayerInstructions,
@@ -197,7 +199,7 @@ export default function TacticsScreen({ setActive, initialTab, embedded }) {
     />}
 
     {tab === "Player & Roles" && <div className="grid">
-      <PlayerList slots={slots} assignment={assignment} playerFor={playerFor} selectedSlotId={selectedSlotId} setSelectedSlotId={setSelectedSlotId} />
+      <PlayerList roster={firstTeamPool} slots={slots} assignment={assignment} playerFor={playerFor} selectedSlotId={selectedSlotId} setSelectedSlotId={setSelectedSlotId} />
       <RolePanel mode="roles" slot={selectedSlot} player={selectedPlayer} roleAssignment={roleAssignment} setRoleAssignment={setRoleAssignment}
         dutyAssignment={dutyAssignment} setDutyAssignment={setDutyAssignment}
         instructions={selectedSlot ? (playerInstructions[selectedSlot.id] || new Set()) : new Set()}
@@ -212,7 +214,7 @@ export default function TacticsScreen({ setActive, initialTab, embedded }) {
     />}
 
     {tab === "Player Instructions" && <div className="grid">
-      <PlayerList slots={slots} assignment={assignment} playerFor={playerFor} selectedSlotId={selectedSlotId} setSelectedSlotId={setSelectedSlotId} />
+      <PlayerList roster={firstTeamPool} slots={slots} assignment={assignment} playerFor={playerFor} selectedSlotId={selectedSlotId} setSelectedSlotId={setSelectedSlotId} />
       <RolePanel mode="instructions" slot={selectedSlot} player={selectedPlayer} roleAssignment={roleAssignment} setRoleAssignment={setRoleAssignment}
         dutyAssignment={dutyAssignment} setDutyAssignment={setDutyAssignment}
         instructions={selectedSlot ? (playerInstructions[selectedSlot.id] || new Set()) : new Set()}
@@ -410,9 +412,9 @@ function FormationTab({
 
 // ================= PLAYER & ROLES / PLAYER INSTRUCTIONS =================
 
-function PlayerList({ slots, assignment, playerFor, selectedSlotId, setSelectedSlotId }) {
+function PlayerList({ roster = [], slots, assignment, playerFor, selectedSlotId, setSelectedSlotId }) {
   const [filter, setFilter] = useState("All Positions");
-  const filtered = useMemo(() => filter === "All Positions" ? firstTeamPool : firstTeamPool.filter(p => p.pos === filter), [filter]);
+  const filtered = useMemo(() => filter === "All Positions" ? roster : roster.filter(p => p.pos === filter), [filter, roster]);
   return <section className="panel available">
     <div className="panel-head"><h3><Users /> Squad</h3>
       <div><select value={filter} onChange={e => setFilter(e.target.value)}><option>All Positions</option>{["GK", "DR", "DL", "DC", "DM", "MC", "AMC", "AML", "AMR", "ST"].map(x => <option key={x}>{x}</option>)}</select><Search size={17} /></div>

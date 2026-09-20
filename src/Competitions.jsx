@@ -10,7 +10,7 @@ import { useCompetitionData } from './store/CompetitionContext.jsx';
 // ---------- Crest helpers (stylised initials, not real club/competition logos) ----------
 
 const TEAM_COLORS = {
-  'Man Utd': '#DA291C', 'Liverpool': '#C8102E', 'Arsenal': '#EF0107', 'Man City': '#6CABDD',
+  'Liverpool': '#C8102E', 'Arsenal': '#EF0107', 'Man City': '#6CABDD',
   'Chelsea': '#034694', 'Tottenham': '#132257', 'Leicester City': '#003090', 'Aston Villa': '#670E36',
   'Newcastle': '#241F20', 'Brighton': '#0057B8', 'Bournemouth': '#DA291C', 'Fulham': '#000000',
   'Crystal Palace': '#1B458F', 'Everton': '#003399', 'West Ham': '#7A263A', 'Brentford': '#E30613',
@@ -20,7 +20,7 @@ const TEAM_COLORS = {
   'Preston North End': '#2E4593', 'Barnsley': '#EE2737',
 };
 const TEAM_CODES = {
-  'Man Utd': 'MU', 'Liverpool': 'LIV', 'Arsenal': 'ARS', 'Man City': 'MCI', 'Chelsea': 'CHE',
+  'Liverpool': 'LIV', 'Arsenal': 'ARS', 'Man City': 'MCI', 'Chelsea': 'CHE',
   'Tottenham': 'TOT', 'Leicester City': 'LEI', 'Aston Villa': 'AVL', 'Newcastle': 'NEW',
   'Brighton': 'BHA', 'Bournemouth': 'BOU', 'Fulham': 'FUL', 'Crystal Palace': 'CRY', 'Everton': 'EVE',
   'West Ham': 'WHU', 'Brentford': 'BRE', 'Wolves': 'WOL', 'Nottingham Forest': 'NFO',
@@ -192,8 +192,8 @@ function League() {
     </div>}
     {sub === 'Top Scorers' && <section className="comp-card"><StatList rows={league.topScorers} valueKey="goals" label="Goals" /></section>}
     {sub === 'Assists' && <section className="comp-card"><StatList rows={league.topAssists} valueKey="assists" label="Assists" /></section>}
-    {sub === 'Team Stats' && <section className="comp-card"><h3>Man Utd — Team Statistics</h3><TeamStatsGrid stats={league.teamStats} /></section>}
-    {sub === 'Player Stats' && <section className="comp-card"><h3>Man Utd — Player Statistics</h3><PlayerStatsTable rows={league.playerStats} /></section>}
+    {sub === 'Team Stats' && <section className="comp-card"><h3>Newcastle — Team Statistics</h3><TeamStatsGrid stats={league.teamStats} /></section>}
+    {sub === 'Player Stats' && <section className="comp-card"><h3>Newcastle — Player Statistics</h3><PlayerStatsTable rows={league.playerStats} /></section>}
     {sub === 'Objectives' && <ObjectivesCard objectives={league.objectives} />}
   </div>;
 }
@@ -216,7 +216,7 @@ function CupDetail({ cup }) {
     <div className="two-col" style={{ marginTop: 10 }}>
       <div>
         <div className="panel-label">Previous Rounds</div>
-        {cup.previousRounds.map((r, i) => <div className="mini-fixture-row" key={i}><span className="mfr-date">{r.round}</span><span className="fixture-team"><b>Man Utd</b></span><span className="fixture-score small">{r.score}</span><span className="fixture-team right"><b>{r.opponent}</b></span></div>)}
+        {cup.previousRounds.map((r, i) => <div className="mini-fixture-row" key={i}><span className="mfr-date">{r.round}</span><span className="fixture-team"><b>Newcastle</b></span><span className="fixture-score small">{r.score}</span><span className="fixture-team right"><b>{r.opponent}</b></span></div>)}
         <div className="panel-label" style={{ marginTop: 8 }}>Next Opponent</div>
         <p className="muted-sub">{cup.nextOpponent}</p>
         <div className="panel-label">Draw</div>
@@ -241,7 +241,7 @@ function Cups() {
     {sub === 'leagueCup' && <CupDetail cup={cups.leagueCup} />}
     {sub === 'other' && cups.other.map(o => <section className="comp-card" key={o.name}>
       <div className="card-head"><CompBadge icon={Shield} color={o.color} /><div><h3>{o.name}</h3><StatusDot label={o.status} color="#4d9dff" /></div><CtaBtn>View Result</CtaBtn></div>
-      <div className="mini-fixture-row"><span className="mfr-date">{o.round}</span><span className="fixture-team"><b>Man Utd</b></span><span className="fixture-score small">{o.score}</span><span className="fixture-team right"><b>{o.opponent}</b></span></div>
+      <div className="mini-fixture-row"><span className="mfr-date">{o.round}</span><span className="fixture-team"><b>Newcastle</b></span><span className="fixture-score small">{o.score}</span><span className="fixture-team right"><b>{o.opponent}</b></span></div>
     </section>)}
   </div>;
 }
@@ -271,7 +271,7 @@ function ContinentalDetail({ comp }) {
         <div className="conf-tie">
           <div className="panel-label">Knockout Play-off — Draw</div>
           <div className="conf-vs">
-            <span className="fixture-team"><Crest team="Man Utd" size={30} /><b>Man Utd</b></span>
+            <span className="fixture-team"><Crest team="Newcastle" size={30} /><b>Newcastle</b></span>
             <b>vs</b>
             <span className="fixture-team"><Crest team={comp.tie.opponent} size={30} /><b>{comp.tie.opponent}</b></span>
           </div>

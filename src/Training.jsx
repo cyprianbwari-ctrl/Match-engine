@@ -5,14 +5,15 @@ import {
   Crosshair, Gauge, HeartPulse, AlertTriangle, CheckCircle2, Sparkles
 } from 'lucide-react';
 import './training.css';
-import { players as roster } from './data/roster.js';
-import { roles as ROLE_OPTIONS } from './data/roster.js';
+import { roles as ROLE_OPTIONS } from './data/tacticalDefinitions.js';
+import { useDatabase } from './store/DatabaseContext.jsx';
 import { useTrainingData, SESSION_TYPES, SESSION_COACH_CATEGORY } from './store/TrainingContext.jsx';
 import { useCompetitionData } from './store/CompetitionContext.jsx';
 import { useCommunicationData } from './store/CommunicationContext.jsx';
 import { useStaffData } from './store/StaffContext.jsx';
 import { useWorldData } from './store/WorldContext.jsx';
 import { mapRosterPlayer } from './data/homeData.js';
+import { usePlayerState } from './store/PlayerStateContext.jsx';
 
 function Avatar({ name, size = 32 }) {
   const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -32,6 +33,7 @@ function coachFor(sessionType, staffList) {
 
 function Overview({ goTo }) {
   const { schedule, delegation, setDelegation, trainingEffectiveness, overloaded } = useTrainingData();
+  const { applyTrainingSession } = usePlayerState();
   const { league } = useCompetitionData();
   const { staffList } = useStaffData();
   const fixture = league.fixtures[0];
@@ -44,12 +46,12 @@ function Overview({ goTo }) {
       <div className="tr-summary-card"><Gauge size={18} color="#3ddc84" /><div><b>{trainingEffectiveness}%</b><span>Training Effectiveness</span></div></div>
       <div className="tr-summary-card"><Activity size={18} color={overloaded.length ? '#ffb84d' : '#3ddc84'} /><div><b>{overloaded.length ? 'High' : 'Optimal'}</b><span>Squad Workload</span></div></div>
       <div className="tr-summary-card"><ShieldAlert size={18} color={overloaded.length > 3 ? '#ff5d5d' : '#3ddc84'} /><div><b>{overloaded.length > 3 ? 'Elevated' : 'Low'}</b><span>Injury Risk</span></div></div>
-      <div className="tr-summary-card"><CalendarDays size={18} color="#4d9dff" /><div><b>{fixture.date}</b><span>Next Match vs {fixture.away === 'Man Utd' ? fixture.home : fixture.away}</span></div></div>
+      <div className="tr-summary-card"><CalendarDays size={18} color="#4d9dff" /><div><b>{fixture.date}</b><span>Next Match vs {fixture.away === 'Newcastle' ? fixture.home : fixture.away}</span></div></div>
     </div>
 
     <div className="two-col">
       <section className="comm-card">
-        <div className="comm-card-head"><Dumbbell size={16} color="#8a6bff" /><h3>Today's Training</h3><button className="link-btn" onClick={() => goTo('schedule')}>View Schedule</button></div>
+        <div className="comm-card-head"><Dumbbell size={16} color="#8a6bff" /><h3>Today's Training</h3><button className="link-btn" onClick={() => goTo('schedule')}>View Schedule</button><button className="link-btn" onClick={() => applyTrainingSession(today.type, today.type === 'Fitness' ? 80 : 60, today.detail)}>Apply Session</button></div>
         <div className="today-session">
           <div><b>{today.type}</b><span>{today.detail}</span></div>
           <span className="tr-time">{today.time}</span>
@@ -261,6 +263,7 @@ const TABS = [['overview', 'Overview', Dumbbell], ['schedule', 'Schedule', Calen
 ['youth', 'Youth', Sprout], ['reports', 'Reports', FileText]];
 
 export default function TrainingScreen({ setActive }) {
+  const { careerSquad: roster } = useDatabase();
   const [tab, setTab] = useState('overview');
   const { openProfileFor } = useWorldData();
   const goTo = (screen) => setActive && setActive(screen);

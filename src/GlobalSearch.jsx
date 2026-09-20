@@ -4,7 +4,7 @@ import {
   Newspaper, Mail, ChevronRight
 } from 'lucide-react';
 import './search.css';
-import { players as roster } from './data/roster.js';
+import { useDatabase } from './store/DatabaseContext.jsx';
 import { mapRosterPlayer } from './data/homeData.js';
 import { useWorldData } from './store/WorldContext.jsx';
 import { useStaffData } from './store/StaffContext.jsx';
@@ -26,6 +26,7 @@ function Avatar({ name, size = 30 }) {
 }
 
 export default function GlobalSearch({ open, onClose, navigateTo }) {
+  const { careerSquad: roster } = useDatabase();
   const [query, setQuery] = useState('');
   const inputRef = useRef(null);
   const { players: worldPlayers, setSelectedId, setProfileOpen, openProfileFor, leagues } = useWorldData();
@@ -44,14 +45,14 @@ export default function GlobalSearch({ open, onClose, navigateTo }) {
   const results = useMemo(() => {
     if (!q) return null;
     const ownPlayers = roster.filter(p => p.name.toLowerCase().includes(q)).slice(0, 5)
-      .map(p => ({ key: `own-${p.id}`, label: p.name, sub: `${p.displayPos} · Man Utd`, action: () => openProfileFor(mapRosterPlayer(p), 'Search') }));
+      .map(p => ({ key: `own-${p.id}`, label: p.name, sub: `${p.displayPos} · Newcastle`, action: () => openProfileFor(mapRosterPlayer(p), 'Search') }));
     const rivalPlayers = worldPlayers.filter(p => p.name.toLowerCase().includes(q)).slice(0, 5)
       .map(p => ({ key: `world-${p.id}`, label: p.name, sub: `${p.pos} · ${p.club}`, action: () => { setSelectedId(p.id); setProfileOpen(true); } }));
     const players = [...ownPlayers, ...rivalPlayers].slice(0, 6);
 
-    const clubNames = new Set(['Man Utd', ...worldPlayers.map(p => p.club)]);
+    const clubNames = new Set(['Newcastle', ...worldPlayers.map(p => p.club)]);
     const clubs = [...clubNames].filter(c => c.toLowerCase().includes(q)).slice(0, 5)
-      .map(c => ({ key: `club-${c}`, label: c, sub: c === 'Man Utd' ? 'Your club' : 'Club', action: () => navigateTo(c === 'Man Utd' ? 'Club Dashboard' : 'World', c === 'Man Utd' ? 'info' : 'ranking') }));
+      .map(c => ({ key: `club-${c}`, label: c, sub: c === 'Newcastle' ? 'Your club' : 'Club', action: () => navigateTo(c === 'Newcastle' ? 'Club Dashboard' : 'World', c === 'Newcastle' ? 'info' : 'ranking') }));
 
     const staff = staffList.filter(s => s.name.toLowerCase().includes(q) || s.category.toLowerCase().includes(q)).slice(0, 5)
       .map(s => ({ key: `staff-${s.id}`, label: s.name, sub: s.category, action: () => navigateTo('Staff') }));

@@ -129,6 +129,12 @@ export function PlayerProfileModal({ goTo }) {
           <div className="pp-form-morale">
             <span>Form</span><div className="pp-form-bar"><i style={{ width: `${Math.min(100, formAvg * 10)}%` }} /></div><b>{formAvg}</b>
             <span>Morale</span><b className="pp-morale">{MORALE_EMOJI[morale] || '🙂'} {morale}</b>
+            <div className="pp-morale-grid">
+              <div><span>Overall</span><b>{live?.happiness ?? (morale==='Good'?82:morale==='Okay'?62:42)}</b></div>
+              <div><span>Playtime</span><b>{live ? (live.relationships?.manager >= 70 ? '😄' : '😠') : '😄'}</b></div>
+              <div><span>Form</span><b>{formAvg >= 7.2 ? '😄' : formAvg >= 6.5 ? '😐' : '😠'}</b></div>
+              <div><span>Promise</span><b>{live?.relationships?.manager >= 75 ? '😄' : '😐'}</b></div>
+            </div>
           </div>
         </div>
       </div>
@@ -241,7 +247,7 @@ export function PlayerProfileModal({ goTo }) {
             <h3>Career History</h3>
             <div className="pp-career-head"><span>Season</span><span>Club</span><span>Apps</span><span>Goals</span><span>Assists</span></div>
             {career.map((c, i) => <div className="pp-career-row" key={i}><b>{c.season}</b><span>{c.club}</span><span>{c.apps}</span><span>{c.goals}</span><span>{c.assists}</span></div>)}
-            {live?.careerStats && <div className="pp-career-row" style={{ borderTop: '1px solid #2a3567', marginTop: 4, paddingTop: 8 }}><b>FAMILY 26 Career</b><span>Man Utd</span><span>{live.careerStats.apps}</span><span>{live.careerStats.goals}</span><span>{live.careerStats.assists}</span></div>}
+            {live?.careerStats && <div className="pp-career-row" style={{ borderTop: '1px solid #2a3567', marginTop: 4, paddingTop: 8 }}><b>FAMILY 26 Career</b><span>Newcastle</span><span>{live.careerStats.apps}</span><span>{live.careerStats.goals}</span><span>{live.careerStats.assists}</span></div>}
           </section>}
 
           {tab === 'Stats' && <section className="pp-card">

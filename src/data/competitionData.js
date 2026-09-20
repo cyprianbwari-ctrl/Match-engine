@@ -7,12 +7,12 @@ export const SEASON = '2025/26';
 // ---------- League ----------
 
 const plClubs = [
-  ['Man Utd', 16, 12, 3, 1, 24, 39],
+  ['Newcastle', 16, 12, 3, 1, 24, 39],
   ['Liverpool', 16, 11, 4, 1, 20, 37],
   ['Arsenal', 16, 10, 4, 2, 18, 34],
   ['Man City', 16, 10, 3, 3, 15, 33],
   ['Chelsea', 16, 9, 4, 3, 12, 31],
-  ['Newcastle', 16, 8, 5, 3, 10, 29],
+  ['West Ham', 16, 8, 5, 3, 10, 29],
   ['Aston Villa', 16, 8, 4, 4, 7, 28],
   ['Tottenham', 16, 7, 5, 4, 6, 26],
   ['Brighton', 16, 7, 4, 5, 3, 25],
@@ -27,44 +27,44 @@ const plClubs = [
   ['Leeds United', 16, 3, 5, 8, -12, 14],
   ['Burnley', 16, 3, 4, 9, -15, 13],
   ['Sunderland', 16, 2, 4, 10, -17, 10],
-].map(([club, p, w, d, l, gd, pts], i) => ({ pos: i + 1, club, p, w, d, l, gd, pts, us: club === 'Man Utd' }));
+].map(([club, p, w, d, l, gd, pts], i) => ({ pos: i + 1, club, p, w, d, l, gd, pts, us: club === 'Newcastle' }));
 
 export const leagueTable = plClubs;
 
 export const leagueResults = [
-  { id: 'l1', comp: 'Premier League', date: '7 Dec 2025', home: 'Man Utd', away: 'Everton', score: '3 - 0' },
-  { id: 'l2', comp: 'Premier League', date: '30 Nov 2025', home: 'Chelsea', away: 'Man Utd', score: '1 - 2' },
-  { id: 'l3', comp: 'Premier League', date: '23 Nov 2025', home: 'Man Utd', away: 'Brighton', score: '2 - 2' },
-  { id: 'l4', comp: 'Premier League', date: '9 Nov 2025', home: 'Man Utd', away: 'Arsenal', score: '1 - 1' },
-  { id: 'l5', comp: 'Premier League', date: '2 Nov 2025', home: 'Fulham', away: 'Man Utd', score: '0 - 3' },
+  { id: 'l1', comp: 'Premier League', date: '7 Dec 2025', home: 'Newcastle', away: 'Everton', score: '3 - 0' },
+  { id: 'l2', comp: 'Premier League', date: '30 Nov 2025', home: 'Chelsea', away: 'Newcastle', score: '1 - 2' },
+  { id: 'l3', comp: 'Premier League', date: '23 Nov 2025', home: 'Newcastle', away: 'Brighton', score: '2 - 2' },
+  { id: 'l4', comp: 'Premier League', date: '9 Nov 2025', home: 'Newcastle', away: 'Arsenal', score: '1 - 1' },
+  { id: 'l5', comp: 'Premier League', date: '2 Nov 2025', home: 'Fulham', away: 'Newcastle', score: '0 - 3' },
 ];
 
 export const leagueFixtures = [
-  { id: 'lf1', comp: 'Premier League', date: 'Today', time: '16:00', home: 'Man Utd', away: 'Tottenham' },
-  { id: 'lf2', comp: 'Premier League', date: 'Sat, 20 Dec', time: '15:00', home: 'Man City', away: 'Man Utd' },
-  { id: 'lf3', comp: 'Premier League', date: 'Sat, 27 Dec', time: '17:30', home: 'Man Utd', away: 'Newcastle' },
-  { id: 'lf4', comp: 'Premier League', date: 'Tue, 30 Dec', time: '19:45', home: 'West Ham', away: 'Man Utd' },
-  { id: 'lf5', comp: 'Premier League', date: 'Sat, 3 Jan', time: '15:00', home: 'Man Utd', away: 'Wolves' },
+  { id: 'lf1', comp: 'Premier League', date: 'Today', time: '16:00', home: 'Newcastle', away: 'Tottenham' },
+  { id: 'lf2', comp: 'Premier League', date: 'Sat, 20 Dec', time: '15:00', home: 'Man City', away: 'Newcastle' },
+  { id: 'lf3', comp: 'Premier League', date: 'Sat, 27 Dec', time: '17:30', home: 'Newcastle', away: 'Aston Villa' },
+  { id: 'lf4', comp: 'Premier League', date: 'Tue, 30 Dec', time: '19:45', home: 'West Ham', away: 'Newcastle' },
+  { id: 'lf5', comp: 'Premier League', date: 'Sat, 3 Jan', time: '15:00', home: 'Newcastle', away: 'Wolves' },
 ];
 
 export const topScorers = [
-  { player: 'Bruno Fernandes', club: 'Man Utd', goals: 13 },
+  { player: 'Rafael Teixeira', club: 'Newcastle', goals: 13 },
   { player: 'Erling Haaland', club: 'Man City', goals: 12 },
   { player: 'Mohamed Salah', club: 'Liverpool', goals: 11 },
-  { player: 'Rasmus Højlund', club: 'Man Utd', goals: 10 },
-  { player: 'Marcus Rashford', club: 'Man Utd', goals: 9 },
+  { player: 'Anders Krogh', club: 'Newcastle', goals: 10 },
+  { player: 'Jayden Okafor', club: 'Newcastle', goals: 9 },
   { player: 'Bukayo Saka', club: 'Arsenal', goals: 9 },
   { player: 'Cole Palmer', club: 'Chelsea', goals: 8 },
-  { player: 'Alexander Isak', club: 'Newcastle', goals: 8 },
+  { player: 'Viktor Solheim', club: 'Napoli', goals: 8 },
 ];
 
 export const topAssists = [
-  { player: 'Bruno Fernandes', club: 'Man Utd', assists: 10 },
+  { player: 'Rafael Teixeira', club: 'Newcastle', assists: 10 },
   { player: 'Kevin De Bruyne', club: 'Man City', assists: 8 },
-  { player: 'Alejandro Garnacho', club: 'Man Utd', assists: 7 },
+  { player: 'Mateo Villanueva', club: 'Newcastle', assists: 7 },
   { player: 'Mohamed Salah', club: 'Liverpool', assists: 7 },
   { player: 'Martin Ødegaard', club: 'Arsenal', assists: 6 },
-  { player: 'Luke Shaw', club: 'Man Utd', assists: 5 },
+  { player: 'Jamie Colton', club: 'Newcastle', assists: 5 },
 ];
 
 export const teamStats = {
@@ -72,16 +72,16 @@ export const teamStats = {
   cleanSheets: 8, yellowCards: 24, redCards: 1, passAccuracy: 86,
 };
 
-// Man Utd player stats — sourced from the shared squad roster.
+// Newcastle United player stats — sourced from the shared squad roster.
 export const playerLeagueStats = [
-  { name: 'Bruno Fernandes', apps: 16, goals: 13, assists: 10, rating: 7.9 },
-  { name: 'Rasmus Højlund', apps: 15, goals: 10, assists: 3, rating: 7.5 },
-  { name: 'Marcus Rashford', apps: 16, goals: 9, assists: 4, rating: 7.6 },
-  { name: 'Alejandro Garnacho', apps: 14, goals: 5, assists: 7, rating: 7.3 },
-  { name: 'Casemiro', apps: 16, goals: 1, assists: 2, rating: 7.2 },
-  { name: 'Kobbie Mainoo', apps: 15, goals: 2, assists: 3, rating: 7.1 },
-  { name: 'Lisandro Martínez', apps: 13, goals: 1, assists: 0, rating: 7.3 },
-  { name: 'André Onana', apps: 16, goals: 0, assists: 0, rating: 6.9 },
+  { name: 'Rafael Teixeira', apps: 16, goals: 13, assists: 10, rating: 7.9 },
+  { name: 'Anders Krogh', apps: 15, goals: 10, assists: 3, rating: 7.5 },
+  { name: 'Jayden Okafor', apps: 16, goals: 9, assists: 4, rating: 7.6 },
+  { name: 'Mateo Villanueva', apps: 14, goals: 5, assists: 7, rating: 7.3 },
+  { name: 'Wagner Aguiar', apps: 16, goals: 1, assists: 2, rating: 7.2 },
+  { name: 'Tyrell Osei', apps: 15, goals: 2, assists: 3, rating: 7.1 },
+  { name: 'Nahuel Ibarra', apps: 13, goals: 1, assists: 0, rating: 7.3 },
+  { name: 'Étienne Mbarga', apps: 16, goals: 0, assists: 0, rating: 6.9 },
 ];
 
 export const leagueObjectives = [
@@ -108,7 +108,7 @@ export const cups = {
     draw: 'Quarter-final draw already completed — Semi-final draw pending.',
     previousRounds: [
       { round: '3rd Round', opponent: 'Barnsley', venue: 'H', score: '5 - 1', result: 'W' },
-      { round: '4th Round', opponent: 'Newcastle', venue: 'A', score: '2 - 1', result: 'W' },
+      { round: '4th Round', opponent: 'West Ham', venue: 'A', score: '2 - 1', result: 'W' },
     ],
     stats: { played: 3, won: 3, drawn: 0, lost: 0, goalsFor: 10, goalsAgainst: 2 },
   },
@@ -118,7 +118,7 @@ export const cups = {
 };
 
 export const cupFixtures = [
-  { id: 'c1', comp: 'Emirates FA Cup', date: 'Sun, 4 Jan', time: '14:00', home: 'Bournemouth', away: 'Man Utd' },
+  { id: 'c1', comp: 'Emirates FA Cup', date: 'Sun, 4 Jan', time: '14:00', home: 'Bournemouth', away: 'Newcastle' },
 ];
 
 // ---------- Continental ----------
@@ -127,15 +127,15 @@ export const continental = {
   ucl: {
     name: 'UEFA Champions League', color: '#c9d3f0', phase: 'League Phase',
     table: [
-      { pos: 1, club: 'Man Utd', p: 6, w: 5, d: 1, l: 0, gd: 12, pts: 16, us: true },
+      { pos: 1, club: 'Newcastle', p: 6, w: 5, d: 1, l: 0, gd: 12, pts: 16, us: true },
       { pos: 2, club: 'Bayern Munich', p: 6, w: 4, d: 1, l: 1, gd: 8, pts: 13 },
       { pos: 3, club: 'Inter Milan', p: 6, w: 2, d: 2, l: 2, gd: 1, pts: 8 },
       { pos: 4, club: 'Real Sociedad', p: 6, w: 1, d: 0, l: 5, gd: -11, pts: 3 },
     ],
-    fixtures: [{ home: 'Man Utd', away: 'Bayern Munich', date: 'Tue, 16 Dec', time: '20:00' }],
+    fixtures: [{ home: 'Newcastle', away: 'Bayern Munich', date: 'Tue, 16 Dec', time: '20:00' }],
     results: [
-      { home: 'Man Utd', away: 'Inter Milan', score: '2 - 1', date: '26 Nov' },
-      { home: 'Real Sociedad', away: 'Man Utd', score: '0 - 3', date: '5 Nov' },
+      { home: 'Newcastle', away: 'Inter Milan', score: '2 - 1', date: '26 Nov' },
+      { home: 'Real Sociedad', away: 'Newcastle', score: '0 - 3', date: '5 Nov' },
     ],
     knockout: 'Top 8 advance directly to the Round of 16; 9th–24th play a knockout play-off round in February.',
     stats: { played: 6, won: 5, drawn: 1, lost: 0, goalsFor: 17, goalsAgainst: 5 },
@@ -143,13 +143,13 @@ export const continental = {
   uel: {
     name: 'UEFA Europa League', color: '#ff8a3d', phase: 'League Phase',
     table: [
-      { pos: 1, club: 'Man Utd', p: 6, w: 4, d: 1, l: 1, gd: 6, pts: 13, us: true },
+      { pos: 1, club: 'Newcastle', p: 6, w: 4, d: 1, l: 1, gd: 6, pts: 13, us: true },
       { pos: 2, club: 'Roma', p: 6, w: 3, d: 1, l: 2, gd: 4, pts: 10 },
       { pos: 3, club: 'Fenerbahçe', p: 6, w: 2, d: 2, l: 2, gd: 0, pts: 8 },
       { pos: 4, club: 'Braga', p: 6, w: 1, d: 0, l: 5, gd: -10, pts: 3 },
     ],
-    fixtures: [{ home: 'Man Utd', away: 'Roma', date: 'Thu, 18 Dec', time: '18:45' }],
-    results: [{ home: 'Braga', away: 'Man Utd', score: '1 - 2', date: '28 Nov' }],
+    fixtures: [{ home: 'Newcastle', away: 'Roma', date: 'Thu, 18 Dec', time: '18:45' }],
+    results: [{ home: 'Braga', away: 'Newcastle', score: '1 - 2', date: '28 Nov' }],
     knockout: 'Top 8 go straight to Round of 16; 9th–24th enter the knockout play-off.',
     stats: { played: 6, won: 4, drawn: 1, lost: 1, goalsFor: 12, goalsAgainst: 6 },
   },
@@ -161,46 +161,39 @@ export const continental = {
   },
 };
 
-// ---------- History (real Manchester United honours & records) ----------
+// ---------- History (real Newcastle United honours & records) ----------
 
 export const previousSeasons = [
-  { season: '2021/22', league: '6th', notes: 'No major trophies', manager: 'Rangnick (interim)' },
-  { season: '2022/23', league: '3rd', notes: 'Carabao Cup winners; FA Cup runners-up', manager: 'Erik ten Hag' },
-  { season: '2023/24', league: '8th', notes: 'FA Cup winners (beat Man City 2-1)', manager: 'Erik ten Hag' },
-  { season: '2024/25', league: '15th', notes: 'Europa League runners-up', manager: 'Ten Hag / van Nistelrooy / Amorim' },
+  { season: '2021/22', league: '13th', notes: 'Mid-table finish', manager: 'Daniel Osgood' },
+  { season: '2022/23', league: '7th', notes: 'Europa Conference League qualification', manager: 'Daniel Osgood' },
+  { season: '2023/24', league: '5th', notes: 'Champions League qualification', manager: 'Marek Novotný (caretaker)' },
+  { season: '2024/25', league: '4th', notes: 'Champions League last 16', manager: 'Marek Novotný' },
 ];
 
 export const trophyCabinet = [
-  { name: 'English League Titles', count: 20, years: '1907/08 – 2012/13' },
-  { name: 'FA Cup', count: 13, years: '1908/09 – 2023/24' },
-  { name: 'League Cup', count: 6, years: '1991/92 – 2022/23' },
-  { name: 'FA Community Shield', count: 21, years: '1908 – 2016' },
-  { name: 'European Cup / Champions League', count: 3, years: '1968, 1999, 2008' },
-  { name: 'UEFA Europa League', count: 1, years: '2017' },
-  { name: 'UEFA Cup Winners\u2019 Cup', count: 1, years: '1991' },
-  { name: 'UEFA Super Cup', count: 1, years: '1991' },
-  { name: 'FIFA Club World Cup', count: 1, years: '2008' },
-  { name: 'Intercontinental Cup', count: 1, years: '1999' },
+  { name: 'League Championship / First Division', count: 4, years: '1904/05 – 1926/27' },
+  { name: 'FA Cup', count: 6, years: '1910 – 1955' },
+  { name: 'Inter-Cities Fairs Cup', count: 1, years: '1969' },
 ];
 
 export const clubRecords = [
-  { label: 'Most League Appearances', value: 'Ryan Giggs — 632' },
-  { label: 'Most Appearances (all comps)', value: 'Ryan Giggs — 963' },
-  { label: 'All-time Top Scorer', value: 'Wayne Rooney — 253 goals' },
-  { label: 'Longest-serving Manager', value: 'Sir Alex Ferguson — 1986–2013' },
-  { label: 'Record Win', value: 'Man Utd 10–0 Wigan Athletic (1995)' },
+  { label: 'Most Appearances', value: 'Jimmy Lawrence — 496' },
+  { label: 'All-time Top Scorer', value: 'Alan Shearer — 206 goals' },
+  { label: 'Longest Uninterrupted Managerial Spell', value: 'Joe Harvey — 1962–1975' },
+  { label: 'Record Win', value: 'Newcastle United 13–0 Newport County (1946)' },
 ];
 
 export const notableAchievements = [
-  { year: '1968', text: 'First English club to win the European Cup.' },
-  { year: '1999', text: 'Historic Treble: Premier League, FA Cup and Champions League.' },
-  { year: '2008', text: 'Champions League and FIFA Club World Cup double.' },
-  { year: '2013', text: 'Record 20th English league title, Sir Alex Ferguson\u2019s final season.' },
+  { year: '1904–1910', text: 'Golden era: three league titles and an FA Cup in six seasons.' },
+  { year: '1927', text: 'Fourth and most recent league title.' },
+  { year: '1955', text: 'Sixth FA Cup, the club\u2019s last major domestic trophy.' },
+  { year: '1969', text: 'Won the Inter-Cities Fairs Cup, the club\u2019s only major European honour.' },
+  { year: '1996', text: 'The \u201cEntertainers\u201d era under Kevin Keegan set a club-record Premier League points tally.' },
 ];
 
 export const historicalStats = {
-  totalMajorTrophies: 68,
-  europeanCups: 3,
-  leagueTitles: 20,
-  domesticCups: 19,
+  totalMajorTrophies: 11,
+  europeanTrophies: 1,
+  leagueTitles: 4,
+  domesticCups: 6,
 };

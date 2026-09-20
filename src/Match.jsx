@@ -1,10 +1,12 @@
+import Football3DPresentation from './Football3DPresentation';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Menu, Play, Pause, SkipBack, SkipForward, Rewind, FastForward, Settings, Sun,
   Crosshair, Gauge, Users, Repeat, X, Check, TriangleAlert, ListVideo, BarChart3,
-  Radio, MessageSquare, Zap, Minus, Plus,
+  Radio, MessageSquare, Zap, Minus, Plus, Maximize2, Minimize2, Monitor, MonitorOff,
 } from 'lucide-react';
 import './match.css';
+import Player3DWebGL from './Player3DWebGL.jsx';
 import { useTacticsData } from './store/TacticsContext.jsx';
 import { useFinanceData } from './store/FinanceContext.jsx';
 import { usePlayerState } from './store/PlayerStateContext.jsx';
@@ -19,19 +21,23 @@ import { mapRosterPlayer } from './data/homeData.js';
 import TacticsScreen from './Tactics.jsx';
 import {
   buildXI, buildOpponentPool, initMatch, stepMatch, resolveDecision, simulateInstant, substitutePlayer,
-} from './engine/matchSimulator.js';
+} from './engine/FAMILY26MatchEngine.js';
 import { FORMATIONS } from './tactics/formations.js';
-import { players as roster } from './data/roster.js';
+import { useDatabase } from './store/DatabaseContext.jsx';
+import { createSeededRng, deriveSeed } from './engine/seededRng.js';
+import { getMatchSeed } from './engine/simulationSeeds.js';
+import { getCareerClubId, getCareerClubName } from './engine/clubIdentity.js';
+import { tacticalRoleAnchor, tacticalPressTrigger, teamShapeTargets } from './engine/tacticalShape.js';
 
 const SPEEDS = [1, 2, 4, 8];
-// Fixed engine tick = 0.5 game-seconds (see matchSimulator.FIXED_GAME_SECONDS).
+// Fixed engine tick = 0.5 game-seconds (see FAMILY26MatchEngine.FIXED_GAME_SECONDS).
 // A full 90' match is therefore 10,800 ticks. We render every 40ms and, per
 // speed tier, consume a base number of ticks per render. At the default
 // (4x + Highlights Only) this alone lands ~2.4 real minutes for 90 game
 // minutes; Highlights Only's quiet-tick skipping (below) pulls that down
 // further, landing in the ~1.5-3 minute range described for default viewing.
 const REAL_TICK_MS = 40;
-const BASE_TICKS_BY_SPEED = { 1: 1, 2: 2, 4: 3, 8: 6 };
+const BASE_TICKS_BY_SPEED = { 1: 2, 2: 4, 4: 8, 8: 16 };
 const HIGHLIGHT_SKIP_MULTIPLIER = 10; // cap on how far a single render can fast-forward through quiet play
 
 const ROLE_NAMES = {
@@ -70,35 +76,63 @@ function matchRating(p) {
 }
 function pct(a, b) { return b > 0 ? Math.round((a / b) * 100) : 0; }
 
-function buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName, league, dutyAssignment }) {
-  const homePairs = slots.map((slot, i) => ({ slot, duty: dutyAssignment?.[slot.id] || 'Support', player: startXI.find(p => p.id === assignment[slot.id]) || startXI[i % startXI.length] }));
-  const homeXI = buildXI(homePairs, 'home');
+function buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, formation, homeName, league, dutyAssignment, matchSeed, currentClubId }) {
+  const userPairs = slots.map((slot, i) => ({ slot, duty: dutyAssignment?.[slot.id] || 'Support', player: startXI.find(p => p.id === assignment[slot.id]) || startXI[i % startXI.length] }));
 
-  const fixture = league.fixtures[0];
-  const oppName = fixture ? (fixture.home === 'Man Utd' ? fixture.away : fixture.home) : 'Brighton';
+  const rawFixture = league.fixtures[0];
+  const fixture = rawFixture ? { ...rawFixture } : null;
+  // `fixtures[0]` is guaranteed by CompetitionContext to be the career club's
+  // next fixture. Never substitute Newcastle or another placeholder club here.
+  const fixtureHome = fixture
+    ? (fixture.homeId != null
+      ? String(fixture.homeId) === String(currentClubId)
+      : fixture.home === homeName)
+    : true;
+  const oppName = fixture ? (fixtureHome ? fixture.away : fixture.home) : 'Brighton';
   const oppRow = league.table.find(r => r.club === oppName) || league.table.find(r => !r.us) || { club: oppName, pts: 20 };
   const oppFormationName = OPPONENT_FORMATION_BY_CLUB[oppName] || '4-3-3';
   const oppSlots = FORMATIONS[oppFormationName];
   const oppPool = buildOpponentPool(60 + Math.min(30, oppRow.pts / 2), oppSlots, oppRow.club);
-  // Give the generated opponent pool recognisable names/positions for this
-  // specific fixture rather than generic placeholders, when we have them.
   const namedPool = oppPool.map((p, i) => BRIGHTON_XI_NAMES[i] ? { ...p, name: BRIGHTON_XI_NAMES[i].name } : p);
   const DEFAULT_DUTY = { GK:'Defend', DL:'Support', DR:'Support', DC:'Defend', DM:'Defend', MC:'Support', AMC:'Support', AML:'Attack', AMR:'Attack', ST:'Attack' };
-  const awayPairs = oppSlots.map((slot, i) => ({ slot, duty: DEFAULT_DUTY[slot.code] || 'Support', player: namedPool[i] }));
-  const awayXI = buildXI(awayPairs, 'away');
+  const opponentPairs = oppSlots.map((slot, i) => ({ slot, duty: DEFAULT_DUTY[slot.code] || 'Support', player: namedPool[i] }));
 
-  // A near-full Old Trafford is real home advantage, not flavour text — it
-  // nudges tempo up slightly, the same way a loud, expectant crowd actually
-  // affects how a team plays.
-  const isHomeFixture = !fixture || fixture.home === 'Man Utd';
+  // Build each side according to the real fixture orientation. This matters
+  // for away matches: the career club must actually be the away side in the
+  // engine, not just in the scoreboard text.
+  const userXI = buildXI(userPairs, fixtureHome ? 'home' : 'away');
+  const opponentXI = buildXI(opponentPairs, fixtureHome ? 'away' : 'home');
+  const homeXI = fixtureHome ? userXI : opponentXI;
+  const awayXI = fixtureHome ? opponentXI : userXI;
+
+  const isHomeFixture = fixtureHome;
   const advantage = isHomeFixture ? homeAdvantageFactor(fixtureDetail(fixture, true).attendance, fixtureDetail(fixture, true).capacity) : 1;
+  const userTactics = {
+    mentality: teamInstructions.mentality,
+    tempo: Math.min(90, Math.round(teamInstructions.tempo * advantage)),
+    width: teamInstructions.width,
+    directness: teamInstructions.passingStyle === 'Direct Passing' ? 78 : teamInstructions.passingStyle === 'Short Passing' ? 28 : 52,
+    buildUp: teamInstructions.buildUp,
+    crossing: teamInstructions.crossing,
+    attackingFocus: teamInstructions.attackingFocus,
+    lineOfEngagement: teamInstructions.lineOfEngagement,
+    compactness: teamInstructions.compactness,
+    transition: teamInstructions.transition,
+    defensiveLine: teamInstructions.defensiveLine,
+    pressing,
+  };
+  const opponentTactics = { mentality: oppRow.pts >= 30 ? 'Positive' : 'Balanced', tempo: oppRow.pts >= 30 ? 62 : 56, defensiveLine: 55, pressing: { intensity: oppRow.pts >= 30 ? 66 : 58 } };
 
   const state = initMatch({
-    homeXI, awayXI, homeName, awayName: oppRow.club,
-    homeTactics: { mentality: teamInstructions.mentality, tempo: Math.min(90, Math.round(teamInstructions.tempo * advantage)), defensiveLine: teamInstructions.defensiveLine, pressing },
-    awayTactics: { mentality: oppRow.pts >= 30 ? 'Positive' : 'Balanced', tempo: oppRow.pts >= 30 ? 62 : 56, defensiveLine: 55, pressing: { intensity: oppRow.pts >= 30 ? 66 : 58 } },
+    homeXI, awayXI,
+    homeName: fixtureHome ? homeName : oppRow.club,
+    awayName: fixtureHome ? oppRow.club : homeName,
+    homeTactics: fixtureHome ? userTactics : opponentTactics,
+    awayTactics: fixtureHome ? opponentTactics : userTactics,
+    matchSeed,
   });
   state.oppFormationName = oppFormationName;
+  state.formationName = FORMATIONS[formation] ? formation : '4-3-3';
   return state;
 }
 
@@ -131,20 +165,28 @@ function PitchMarker({ p, isBall, onClick, selected }) {
 }
 
 export default function MatchScreen({ setActive }) {
+  const db = useDatabase();
+  const { careerSquad: roster } = db;
   const { slots, assignment, startXI, teamInstructions, pressing, tacticalDelegation, formation, dutyAssignment } = useTacticsData();
   const { league, recordUserMatchResult } = useCompetitionData();
-  const { reportLiveMatch, unlockAfterMatch } = useSimulation();
+  const { reportLiveMatch, unlockAfterMatch, now: simulationNow } = useSimulation();
   const { openProfileFor } = useWorldData();
   const finance = useFinanceData();
   const playerState = usePlayerState();
   const { addNews } = useCommunicationData();
   const manager = useManagerData();
   const clubState = useClubState();
+  const currentClubId = getCareerClubId(manager.profile, db);
+  const currentClubName = getCareerClubName(manager.profile, db);
+  const currentFixture = league.fixtures?.[0];
+  const fixtureIsHome = currentFixture?.homeId ? String(currentFixture.homeId) === String(currentClubId) : currentFixture?.home === currentClubName;
+  const currentOpponent = currentFixture ? (fixtureIsHome ? currentFixture.away : currentFixture.home) : 'Brighton';
+  const matchSeed = getMatchSeed(manager.profile?.careerSeed, simulationNow?.toISOString?.() || '', currentClubId, currentOpponent, league.name || 'Premier League');
 
-  const [match, setMatch] = useState(() => buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName: 'Man Utd', league, dutyAssignment }));
+  const [match, setMatch] = useState(() => buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, formation, homeName: currentClubName, league, dutyAssignment, matchSeed, currentClubId }));
   const [running, setRunning] = useState(false);
-  const [speed, setSpeed] = useState(4);
-  const [highlightsOnly, setHighlightsOnly] = useState(true);
+  const [speed, setSpeed] = useState(1);
+  const [highlightsOnly, setHighlightsOnly] = useState(false);
   const [view, setView] = useState('Tactical');
   const [statsTab, setStatsTab] = useState('Match');
   const [feedTab, setFeedTab] = useState('Live Commentary');
@@ -156,10 +198,17 @@ export default function MatchScreen({ setActive }) {
   const [teamTalkNote, setTeamTalkNote] = useState('');
   const [halfTimeOpen, setHalfTimeOpen] = useState(false);
   const [tacticsOverlayOpen, setTacticsOverlayOpen] = useState(false);
+  const [matchFullscreen, setMatchFullscreen] = useState(false);
+  const [browserFullscreen, setBrowserFullscreen] = useState(false);
+  const matchWindowRef = useRef(null);
   const halfTimeShown = useRef(false);
   const resultRecorded = useRef(false);
   const MAX_SUBS = 5;
   const MAX_BENCH_CHOICES = 10;
+
+  // 3D player asset contract: when real kit/badge images are supplied, these
+// visual assets can be attached to each player without changing match logic.
+// The current procedural model is the video-matched fallback renderer.
 
   // Simulation loop. See BASE_TICKS_BY_SPEED comment for the timing model.
   useEffect(() => {
@@ -191,21 +240,38 @@ export default function MatchScreen({ setActive }) {
   // instructions actually start influencing player behaviour immediately,
   // per spec, without restarting the match.
   useEffect(() => {
-    setMatch(m => m.finished ? m : { ...m, homeTactics: { ...m.homeTactics, mentality: teamInstructions.mentality, tempo: teamInstructions.tempo, defensiveLine: teamInstructions.defensiveLine, pressing } });
+    setMatch(m => m.finished ? m : { ...m, homeTactics: {
+      ...m.homeTactics,
+      mentality: teamInstructions.mentality,
+      tempo: teamInstructions.tempo,
+      width: teamInstructions.width,
+      directness: teamInstructions.passingStyle === 'Direct Passing' ? 78 : teamInstructions.passingStyle === 'Short Passing' ? 28 : 52,
+      buildUp: teamInstructions.buildUp,
+      crossing: teamInstructions.crossing,
+      attackingFocus: teamInstructions.attackingFocus,
+      lineOfEngagement: teamInstructions.lineOfEngagement,
+      compactness: teamInstructions.compactness,
+      transition: teamInstructions.transition,
+      defensiveLine: teamInstructions.defensiveLine,
+      pressing,
+    } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teamInstructions.mentality, teamInstructions.tempo, teamInstructions.defensiveLine, pressing.intensity, pressing.trigger]);
+  }, [teamInstructions, pressing]);
 
   const restart = () => {
     resultRecorded.current = false;
     halfTimeShown.current = false;
-    setMatch(buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, homeName: 'Man Utd', league, dutyAssignment }));
+    setMatch(buildMatchState({ slots, assignment, startXI, teamInstructions, pressing, formation, homeName: currentClubName, league, dutyAssignment, matchSeed, currentClubId }));
     setSelectedId(null); setSubsMade(0); setHalfTimeOpen(false);
   };
+  const userIsHome = match.homeName === currentClubName;
+  const userXI = userIsHome ? match.homeXI : match.awayXI;
+  const userOpponentName = userIsHome ? match.awayName : match.homeName;
   const bench = useMemo(() =>
-    roster.filter(p => !match.homeXI.some(h => h.id === p.id))
+    roster.filter(p => !userXI.some(h => h.id === p.id))
       .sort((a, b) => b.fit - a.fit)
       .slice(0, MAX_BENCH_CHOICES),
-  [match.homeXI]);
+  [roster, userXI]);
 
   // Half-time is a hard stop, not just a label change: the moment the clock
   // crosses 45', the engine pauses itself and hands control to the manager
@@ -222,10 +288,11 @@ export default function MatchScreen({ setActive }) {
   const makeSub = (inPlayer) => {
     if (!subOut || subsMade >= MAX_SUBS) return;
     setMatch(m => {
-      const outPlayer = m.homeXI.find(p => p.id === subOut);
-      const newXI = substitutePlayer(m.homeXI, subOut, inPlayer);
-      const events = [{ minute: m.minute, second: m.second, text: `Substitution: ${inPlayer.name} replaces ${outPlayer?.name || 'a player'}.`, type: 'sub', team: 'home' }, ...m.events].slice(0, 80);
-      return { ...m, homeXI: newXI, events };
+      const userSide = m.homeName === currentClubName ? 'homeXI' : 'awayXI';
+      const outPlayer = m[userSide].find(p => p.id === subOut);
+      const newXI = substitutePlayer(m[userSide], subOut, inPlayer);
+      const events = [{ minute: m.minute, second: m.second, text: `Substitution: ${inPlayer.name} replaces ${outPlayer?.name || 'a player'}.`, type: 'sub', team: m.homeName === currentClubName ? 'home' : 'away' }, ...m.events].slice(0, 80);
+      return { ...m, [userSide]: newXI, events };
     });
     setSubsMade(n => n + 1);
     setSubOut(null);
@@ -249,6 +316,27 @@ export default function MatchScreen({ setActive }) {
     });
   };
   const choose = (key) => setMatch(m => resolveDecision({ ...m }, key));
+
+  const toggleMatchFullscreen = () => setMatchFullscreen(v => !v);
+  const toggleBrowserFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await (matchWindowRef.current || document.documentElement).requestFullscreen();
+        setBrowserFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {
+      // Browser fullscreen can be denied by permissions or embedding; the
+      // match-only fullscreen remains available as a reliable fallback.
+    }
+  };
+
+  useEffect(() => {
+    const onFullscreenChange = () => setBrowserFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
   const giveTeamTalk = (tone) => {
     const notes = { Calm: 'The players look settled and composed.', Encouraging: 'The dressing room responds well — spirits are up.', Demanding: 'A few sharp words. The response will show in the next few minutes.' };
     setTeamTalkNote(notes[tone]);
@@ -264,29 +352,30 @@ export default function MatchScreen({ setActive }) {
   }, [match.pendingDecision, tacticalDelegation]);
 
   useEffect(() => {
-    reportLiveMatch({ inProgress: running && !match.finished, minute: match.minute, second: match.second, homeScore: match.score.home, awayScore: match.score.away, opponent: match.awayName, finished: match.finished });
+    reportLiveMatch({ inProgress: running && !match.finished, minute: match.minute, second: match.second, homeScore: match.score.home, awayScore: match.score.away, opponent: userOpponentName, finished: match.finished });
     if (match.finished && !resultRecorded.current) {
       resultRecorded.current = true;
       recordUserMatchResult(match.score.home, match.score.away);
       // A manager's reputation is a real, moving number now — built from
       // actual results, not just a static profile field.
       {
-        const weWon = match.homeName === 'Man Utd' ? match.score.home > match.score.away : match.score.away > match.score.home;
+        const weWon = match.homeName === currentClubName ? match.score.home > match.score.away : match.score.away > match.score.home;
         const weDrew = match.score.home === match.score.away;
-        const oppName = match.homeName === 'Man Utd' ? match.awayName : match.homeName;
-        if (weWon) manager.adjustReputation(1.5 + Math.random() * 1.5, `Win against ${oppName}`);
+        const oppName = match.homeName === currentClubName ? match.awayName : match.homeName;
+        const resultRng = createSeededRng(deriveSeed('post-match', matchSeed, match.score.home, match.score.away));
+        if (weWon) manager.adjustReputation(1.5 + resultRng() * 1.5, `Win against ${oppName}`);
         else if (weDrew) manager.adjustReputation(-0.2, `Draw with ${oppName}`);
-        else manager.adjustReputation(-(1.5 + Math.random() * 1.5), `Defeat to ${oppName}`);
+        else manager.adjustReputation(-(1.5 + resultRng() * 1.5), `Defeat to ${oppName}`);
         // The board reacts to results too — a touch more conservatively
         // than your own reputation, since one bad result rarely shakes
         // board confidence as much as a genuine run of form would.
-        if (weWon) clubState.adjustBoardConfidence(1 + Math.random(), `Win against ${oppName}`);
-        else if (!weDrew) clubState.adjustBoardConfidence(-(1 + Math.random() * 1.5), `Defeat to ${oppName}`);
+        if (weWon) clubState.adjustBoardConfidence(1 + resultRng(), `Win against ${oppName}`);
+        else if (!weDrew) clubState.adjustBoardConfidence(-(1 + resultRng() * 1.5), `Defeat to ${oppName}`);
       }
       // Every completed home fixture should actually generate matchday
       // income — an away trip still earns a smaller broadcast/travelling
       // support share, not a full house of ticket revenue.
-      const weAreHome = match.homeName === 'Man Utd';
+      const weAreHome = match.homeName === currentClubName;
       const won = weAreHome ? match.score.home > match.score.away : match.score.away > match.score.home;
       // Real attendance-based revenue for home games (same fixture detail
       // shown pre-match in the Matchday hub, not a separate random number)
@@ -294,7 +383,8 @@ export default function MatchScreen({ setActive }) {
       // half-empty one, and away trips only ever earn a broadcast/travel
       // share, never ticket revenue.
       const homeRevenue = weAreHome ? homeMatchdayRevenue(league.fixtures[0]) : null;
-      const base = weAreHome ? homeRevenue.amount : 350_000 + Math.round(Math.random() * 250_000);
+      const revenueRng = createSeededRng(deriveSeed('away-revenue', matchSeed));
+      const base = weAreHome ? homeRevenue.amount : 350_000 + Math.round(revenueRng() * 250_000);
       const amount = won ? Math.round(base * 1.15) : base;
       finance.addTransaction(
         weAreHome ? `Matchday Revenue vs ${match.awayName} (${homeRevenue.attendance.toLocaleString()} attendance)` : `Away Day Share — ${match.homeName}`,
@@ -305,7 +395,7 @@ export default function MatchScreen({ setActive }) {
       // sitting at their seed values forever, and what can trigger a real
       // injury record tied to the current in-game date.
       const dateLabel = new Date().toDateString();
-      match.homeXI.forEach(p => {
+      userXI.forEach(p => {
         if (typeof p.id !== 'number') return; // skip synthetic opponent players
         const rating = Number(matchRating(p));
         playerState.recordMatchPerformance(p.id, {
@@ -313,20 +403,21 @@ export default function MatchScreen({ setActive }) {
           goals: p.goals || 0, assists: p.assists || 0, shots: p.shots || 0, tackles: p.tackles || 0,
           passesCompleted: p.passesCompleted || 0, passesAttempted: p.passesAttempted || 0,
           yellowCards: p.yellowCards || 0, redCard: !!p.redCard,
-          cleanSheet: match.score.away === 0 && match.homeName === 'Man Utd',
+          cleanSheet: userIsHome ? match.score.away === 0 : match.score.home === 0,
         });
         // Small extra injury risk tied to how physical the match was for
         // this player — separate from the independent daily knock risk.
         const injuryChance = 0.02 + (p.tackles || 0) * 0.004;
-        if (Math.random() < injuryChance) {
+        const matchInjuryRng = createSeededRng(deriveSeed('match-injury', matchSeed, p.id, p.tackles || 0, p.shots || 0));
+        if (matchInjuryRng() < injuryChance) {
           const info = playerState.applyInjury(p.id, dateLabel);
-          addNews({ category: 'Injury', bucket: 'Club News', crest: 'Man Utd', headline: `${p.name} injured — ${info.type}`, body: `Expected to be out until ${info.expectedReturn}.` });
+          addNews({ category: 'Injury', bucket: 'Club News', crest: currentClubName, headline: `${p.name} injured — ${info.type}`, body: `Expected to be out until ${info.expectedReturn}.` });
         }
         // A red card is a genuine event that should reach News too, not
         // just sit in the match report — one event, multiple consequences.
         if (p.redCard) {
           const opponentName = weAreHome ? match.awayName : match.homeName;
-          addNews({ category: 'Discipline', bucket: 'Club News', crest: 'Man Utd', headline: `${p.name} sent off vs ${opponentName}`, body: `${p.name} will serve a suspension for the next fixture.` });
+          addNews({ category: 'Discipline', bucket: 'Club News', crest: currentClubName, headline: `${p.name} sent off vs ${opponentName}`, body: `${p.name} will serve a suspension for the next fixture.` });
         }
       });
       playerState.tickSuspensions();
@@ -334,7 +425,7 @@ export default function MatchScreen({ setActive }) {
   }, [running, match.minute, match.second, match.finished, match.score.home, match.score.away]);
 
   useEffect(() => () => {
-    if (!match.finished) reportLiveMatch({ inProgress: false, minute: match.minute, second: match.second, homeScore: match.score.home, awayScore: match.score.away, opponent: match.awayName, finished: false, awayFromScreen: true });
+    if (!match.finished) reportLiveMatch({ inProgress: false, minute: match.minute, second: match.second, homeScore: match.score.home, awayScore: match.score.away, opponent: userOpponentName, finished: false, awayFromScreen: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -362,269 +453,144 @@ export default function MatchScreen({ setActive }) {
     ? { transform: `scale(1.7) translate(${(50 - match.ballX) * 0.55}%, ${(50 - match.ballY) * 0.55}%)`, transition: 'transform 300ms ease-out' }
     : { transform: 'scale(1)', transition: 'transform 400ms ease-out' };
 
-  return <div className="match-page">
-    <div className="mtb">
-      <button className="mtb-menu"><Menu size={19} /></button>
-      <button className="mtb-brand" onClick={() => setActive('Home')}>FAMILY<span>26</span></button>
-      <div className="mtb-team"><b>{match.homeName}</b><small>{formation}</small></div>
-      <div className="mtb-score">{match.score.home} - {match.score.away}</div>
-      <div className="mtb-team right"><b>{match.awayName}</b><small>{match.oppFormationName}</small></div>
-      <div className="mtb-clock"><Radio size={13} color={running ? '#ff5d5d' : '#8f9abb'} /> {mm}:{ss}{match.finished ? <span className="ft"> · FT</span> : <small>{half}</small>}</div>
-      <div className="mtb-weather"><Sun size={15} /> 12°C<small>Old Trafford</small></div>
-      <div className="mtb-speeds">{SPEEDS.map(s => <button key={s} className={speed === s ? 'active' : ''} onClick={() => setSpeed(s)}>{s}x</button>)}</div>
-      <button className="mtb-icon" onClick={() => window.confirm('Restart the match from kick-off?') && restart()} title="Restart match"><SkipBack size={16} /></button>
-      <button className="mtb-icon play" onClick={() => setRunning(r => !r)} disabled={match.finished}>{running ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}</button>
-      <button className="mtb-icon" onClick={jumpToNextHighlight} title="Jump to next highlight"><SkipForward size={16} /></button>
-      <button className="mtb-icon" onClick={() => setTacticsOverlayOpen(true)} title="Match settings"><Settings size={16} /></button>
+  const defaultCamera = 'Broadcast';
+  const cameraZoom = defaultCamera === 'Broadcast' ? 1 : 1.08;
+  const cameraFocusX = 50 + (match.ballX - 50) * 0.08;
+  const cameraFocusY = 50 + (match.ballY - 50) * 0.08;
+  const stageVars = {
+    '--camera-x': `${cameraFocusX}%`,
+    '--camera-y': `${cameraFocusY}%`,
+    '--camera-zoom': cameraZoom,
+  };
+  const depthScale = (p) => (0.64 + (Number(p.y || 50) / 100) * 0.48).toFixed(3);
+  const playerHeight = (p) => Math.round(34 + (Number(p.y || 50) / 100) * 12);
+
+  const eventLabel = (e) => e.type === 'goal' ? 'GOAL' : e.type === 'foul' ? 'FOUL' : e.type === 'sub' ? 'SUB' : e.type === 'card' ? 'CARD' : e.type === 'setpiece' ? 'CORNER' : e.type === 'turnover' ? 'TURNOVER' : 'CHANCE';
+  const liveEvents = match.events.filter(e => e.type !== 'play' && e.type !== 'info').slice(0, 8);
+
+  return <div ref={matchWindowRef} className={`match-page match-3d-page performance-adaptive ${matchFullscreen ? 'match-only-fullscreen' : ''} ${browserFullscreen ? 'browser-fullscreen' : ''}`}>
+    <div className="match-3d-topbar">
+      <div className="brand-lockup"><span className="brand-mark">♛</span><b>FAMILY <i>26</i></b></div>
+      <div className="competition-chip"><small>{league.name}</small><b>Matchday {league.table.find(r => r.us)?.p ?? 0}</b></div>
+      <div className="scoreboard-3d">
+        <div className="score-team home"><span className="crest-mini">MU</span><b>{match.homeName}</b></div>
+        <strong>{match.score.home} <em>–</em> {match.score.away}</strong>
+        <div className="score-team away"><b>{match.awayName}</b><span className="crest-mini away">B</span></div>
+        <div className="score-clock"><span className={running ? 'live-dot on' : 'live-dot'} />{mm}:{ss}<small>{match.finished ? 'FULL-TIME' : half}</small></div>
+      </div>
+      <div className="match-top-actions">
+        <button className="icon-button" onClick={toggleMatchFullscreen} title="Match fullscreen">{matchFullscreen ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}</button>
+        <button className="icon-button" onClick={toggleBrowserFullscreen} title="Browser fullscreen">{browserFullscreen ? <MonitorOff size={15}/> : <Monitor size={15}/>}</button>
+      </div>
+      <div className="match-top-tactics">
+        <div><small>MENTALITY</small><b>{teamInstructions.mentality}</b></div>
+        <div><small>FORMATION</small><b>{formation}</b></div>
+        <div><small>PRESS</small><b>{Math.round(pressing.intensity)}%</b></div>
+        <div><small>TEMPO</small><b>{Math.round(teamInstructions.tempo)}</b></div>
+      </div>
+      <button className="icon-button" onClick={() => setTacticsOverlayOpen(true)} title="Match settings"><Settings size={17} /></button>
     </div>
 
-    {match.pendingDecision && <div className="md-decision">
-      <div className="md-decision-head"><TriangleAlert size={16} color="#ffb84d" /> Decision Required</div>
+    {match.pendingDecision && <div className="decision-3d">
+      <div><TriangleAlert size={16} /><b>Decision Required</b></div>
       <p>{match.pendingDecision.text}</p>
-      {tacticalDelegation === 'Automatic'
-        ? <p className="muted-sub">Assistant Manager is handling this automatically...</p>
-        : <div className="md-decision-options">{match.pendingDecision.options.map(o => <button key={o.key} onClick={() => choose(o.key)}><b>{o.key}</b> {o.label}</button>)}</div>}
+      {tacticalDelegation === 'Automatic' ? <small>Assistant Manager is handling this automatically…</small> : <div className="decision-options-3d">{match.pendingDecision.options.map(o => <button key={o.key} onClick={() => choose(o.key)}><b>{o.key}</b>{o.label}</button>)}</div>}
     </div>}
 
-    {halfTimeOpen && <div className="ht-backdrop">
-      <div className="ht-panel">
-        <div className="ht-head">
-          <span className="ht-badge">HALF-TIME</span>
-          <h2>{match.homeName} {match.score.home} - {match.score.away} {match.awayName}</h2>
-        </div>
-        <div className="ht-stats">
-          <StatRow label="Possession" home={possessionHome} away={100 - possessionHome} format={v => `${v}%`} />
-          <StatRow label="Shots" home={homeStats.shots} away={awayStats.shots} />
-          <StatRow label="Shots on Target" home={homeStats.onTarget} away={awayStats.onTarget} />
-          <StatRow label="xG" home={(homeStats.xG || 0).toFixed(2)} away={(awayStats.xG || 0).toFixed(2)} />
-          <StatRow label="Pass Completion" home={passCompHome} away={passCompAway} format={v => `${v}%`} />
-        </div>
-        <div className="ht-actions">
-          <button onClick={() => setTeamTalkOpen(true)}><MessageSquare size={15} /><div><b>Team Talk</b><small>Address the dressing room</small></div></button>
-          <button onClick={() => setTacticsOverlayOpen(true)}><Crosshair size={15} /><div><b>Tactics</b><small>Adjust formation or instructions</small></div></button>
-          <button onClick={() => setSubsOpen(true)} disabled={subsMade >= MAX_SUBS}><Repeat size={15} /><div><b>Substitutions</b><small>{MAX_SUBS - subsMade} of {MAX_SUBS} remaining</small></div></button>
-        </div>
-        <button className="ht-continue" onClick={() => { setHalfTimeOpen(false); setRunning(true); }}><Play size={15} fill="currentColor" /> Continue to Second Half</button>
-      </div>
-    </div>}
+    {halfTimeOpen && <div className="ht-backdrop"><div className="ht-panel">
+      <div className="ht-head"><span className="ht-badge">HALF-TIME</span><h2>{match.homeName} {match.score.home} - {match.score.away} {match.awayName}</h2></div>
+      <div className="ht-stats"><StatRow label="Possession" home={possessionHome} away={100 - possessionHome} format={v => `${v}%`} /><StatRow label="Shots" home={homeStats.shots} away={awayStats.shots} /><StatRow label="xG" home={(homeStats.xG || 0).toFixed(2)} away={(awayStats.xG || 0).toFixed(2)} /><StatRow label="Pass Completion" home={passCompHome} away={passCompAway} format={v => `${v}%`} /><StatRow label="Tackles" home={homeStats.tackles||0} away={awayStats.tackles||0}/><StatRow label="Interceptions" home={homeStats.interceptions||0} away={awayStats.interceptions||0}/><StatRow label="Saves" home={homeStats.saves||0} away={awayStats.saves||0}/><StatRow label="Fouls" home={homeStats.fouls||0} away={awayStats.fouls||0}/><StatRow label="Corners" home={homeStats.corners||0} away={awayStats.corners||0}/></div>
+      <div className="ht-actions"><button onClick={() => setTeamTalkOpen(true)}><MessageSquare size={15} /><div><b>Team Talk</b><small>Address the dressing room</small></div></button><button onClick={() => setTacticsOverlayOpen(true)}><Crosshair size={15} /><div><b>Tactics</b><small>Adjust the match plan</small></div></button><button onClick={() => setSubsOpen(true)} disabled={subsMade >= MAX_SUBS}><Repeat size={15} /><div><b>Substitutions</b><small>{MAX_SUBS - subsMade} remaining</small></div></button></div>
+      <button className="ht-continue" onClick={() => { setHalfTimeOpen(false); setRunning(true); }}><Play size={15} fill="currentColor" /> Continue to Second Half</button>
+    </div></div>}
 
-    {tacticsOverlayOpen && <div className="ht-backdrop">
-      <div className="ht-panel tactics-embed-panel">
-        <div className="ht-embed-head"><b>Tactics — In Match</b><button className="md-close" onClick={() => setTacticsOverlayOpen(false)}><X size={15} /></button></div>
-        <div className="ht-embed-body"><TacticsScreen setActive={() => {}} initialTab="Formation" embedded /></div>
-      </div>
-    </div>}
+    {tacticsOverlayOpen && <div className="ht-backdrop"><div className="ht-panel tactics-embed-panel"><div className="ht-embed-head"><b>Tactics — In Match</b><button className="md-close" onClick={() => setTacticsOverlayOpen(false)}><X size={15} /></button></div><div className="ht-embed-body"><TacticsScreen setActive={() => {}} initialTab="Formation" embedded /></div></div></div>}
 
-    {match.finished && <div className="ht-backdrop">
-      <div className="ht-panel pm-panel">
-        <div className="ht-head">
-          <span className="ht-badge">FULL-TIME</span>
-          <h2>{match.homeName} {match.score.home} - {match.score.away} {match.awayName}</h2>
+    {match.finished && <div className="ht-backdrop"><div className="ht-panel pm-panel">
+      <div className="ht-head"><span className="ht-badge">FULL-TIME</span><h2>{match.homeName} {match.score.home} - {match.score.away} {match.awayName}</h2></div>
+      <div className="ht-stats"><StatRow label="Possession" home={possessionHome} away={100 - possessionHome} format={v => `${v}%`} /><StatRow label="Shots" home={homeStats.shots} away={awayStats.shots} /><StatRow label="Shots on Target" home={homeStats.onTarget} away={awayStats.onTarget} /><StatRow label="xG" home={(homeStats.xG || 0).toFixed(2)} away={(awayStats.xG || 0).toFixed(2)} /><StatRow label="Corners" home={homeStats.corners} away={awayStats.corners} /><StatRow label="Pass Completion" home={passCompHome} away={passCompAway} format={v => `${v}%`} /></div>
+      <div className="pm-section"><h4>Match Events</h4><div className="pm-event-list">{match.events.filter(e => ['goal','sub','foul','card'].includes(e.type)).slice().reverse().map((e,i)=><div className="pm-event-row" key={i}><b>{e.minute}'</b><span>{e.text}</span></div>)}</div></div>
+      <div className="pm-section"><h4>Top Performers</h4><div className="pm-ratings">{[...userXI].sort((a,b)=>matchRating(b)-matchRating(a)).slice(0,4).map(p=><div className="pm-rating-row" key={p.id}><span>{p.name}</span><em className={matchRating(p)<6.8?'low':''}>{matchRating(p)}</em></div>)}</div></div>
+      <button className="ht-continue" style={{marginTop:16}} onClick={() => { unlockAfterMatch(); setActive('Home'); }}><Check size={15} /> Continue</button>
+    </div></div>}
+
+    {subsOpen && <div className="md-subs-panel"><div className="md-subs-head"><b>Make a Substitution</b><span className="muted-sub">Pick who comes off, then who comes on. {MAX_SUBS - subsMade} remaining.</span><button className="md-close" onClick={() => { setSubsOpen(false); setSubOut(null); }}><X size={15} /></button></div><div className="md-subs-body"><div className="md-subs-col"><div className="panel-label">On the Pitch</div>{userXI.map(p=><button key={p.id} className={`md-sub-row ${subOut===p.id?'active':''}`} disabled={subsMade>=MAX_SUBS} onClick={()=>setSubOut(p.id)}><b>{p.name}</b><span>{p.role}</span></button>)}</div><div className="md-subs-col"><div className="panel-label">Bench</div>{!subOut&&<p className="muted-sub">Pick an outgoing player first.</p>}{subOut&&subsMade<MAX_SUBS&&bench.map(p=><button key={p.id} className="md-sub-row" onClick={()=>makeSub(p)}><b>{p.name}</b><span>{p.displayPos} · OVR {p.ovr} · Fit {p.fit}%</span></button>)}</div></div></div>}
+
+    {teamTalkOpen && <div className="md-subs-panel"><div className="md-subs-head"><b>Team Talk</b><span className="muted-sub">Your tone affects morale and motivation.</span><button className="md-close" onClick={() => setTeamTalkOpen(false)}><X size={15} /></button></div><div className="tt-choices">{['Calm','Encouraging','Demanding'].map(t=><button key={t} onClick={()=>giveTeamTalk(t)}>{t}</button>)}</div>{teamTalkNote&&<p className="muted-sub" style={{marginTop:10}}>{teamTalkNote}</p>}</div>}
+
+    <main className="match-3d-shell">
+      <section className={`match-3d-stage ${running ? 'running' : 'paused'}`} style={stageVars} aria-label="FAMILY 26 3D match view">
+        <div className="match-tv-topbar">
+          <div className="tv-team home"><span className="tv-crest">WH</span><div><b>{match.homeName}</b><small>HOME · {formation}</small></div></div>
+          <div className="tv-score"><small>{match.finished ? 'FULL TIME' : half}</small><strong>{match.score.home} <i>—</i> {match.score.away}</strong><em>{mm}:{ss}</em></div>
+          <div className="tv-team away"><div><b>{match.awayName}</b><small>AWAY · {match.oppFormationName}</small></div><span className="tv-crest away">BR</span></div>
         </div>
-        <div className="ht-stats">
-          <StatRow label="Possession" home={possessionHome} away={100 - possessionHome} format={v => `${v}%`} />
-          <StatRow label="Shots" home={homeStats.shots} away={awayStats.shots} />
-          <StatRow label="Shots on Target" home={homeStats.onTarget} away={awayStats.onTarget} />
-          <StatRow label="xG" home={(homeStats.xG || 0).toFixed(2)} away={(awayStats.xG || 0).toFixed(2)} />
-          <StatRow label="Corners" home={homeStats.corners} away={awayStats.corners} />
-          <StatRow label="Fouls" home={homeStats.fouls} away={awayStats.fouls} />
-          <StatRow label="Pass Completion" home={passCompHome} away={passCompAway} format={v => `${v}%`} />
+        <div className="match-tactical-ribbon">
+          <span className="live-dot">● LIVE</span><span>{teamInstructions.mentality}</span><span>{formation}</span><span>Width {Math.round(teamInstructions.width)}</span><span>Tempo {Math.round(teamInstructions.tempo)}</span><span>Press {Math.round(pressing.intensity)}%</span><span>Line {Math.round(teamInstructions.defensiveLine)}</span>
+          <button onClick={()=>setTacticsOverlayOpen(true)}><Crosshair size={12}/> TACTICS</button>
         </div>
-        <div className="pm-section">
-          <h4>Match Events</h4>
-          <div className="pm-event-list">
-            {match.events.filter(e => ['goal', 'sub', 'foul', 'card'].includes(e.type)).slice().reverse().map((e, i) => <div className="pm-event-row" key={i}><b>{e.minute}'</b><span>{e.text}</span></div>)}
-            {match.events.filter(e => ['goal', 'sub', 'foul', 'card'].includes(e.type)).length === 0 && <p className="muted-sub">A quiet match — no major events recorded.</p>}
-          </div>
-        </div>
-        <div className="pm-section">
-          <h4>Top Performers</h4>
-          <div className="pm-ratings">
-            {[...match.homeXI].sort((a, b) => matchRating(b) - matchRating(a)).slice(0, 4).map(p => <div className="pm-rating-row" key={p.id}><span>{p.name}</span><em className={matchRating(p) < 6.8 ? 'low' : ''}>{matchRating(p)}</em></div>)}
-          </div>
-        </div>
-        <button className="ht-continue" style={{ marginTop: 16 }} onClick={() => { unlockAfterMatch(); setActive('Home'); }}><Check size={15} /> Continue</button>
-      </div>
-    </div>}
-
-    {subsOpen && <div className="md-subs-panel">
-      <div className="md-subs-head"><b>Make a Substitution</b><span className="muted-sub">Pick who comes off, then who comes on. {MAX_SUBS - subsMade} of {MAX_SUBS} substitutions remaining.</span><button className="md-close" onClick={() => { setSubsOpen(false); setSubOut(null); }}><X size={15} /></button></div>
-      {subsMade >= MAX_SUBS && <p className="muted-sub" style={{ padding: '0 4px 10px', color: '#ff8080' }}>You've used all {MAX_SUBS} substitutions for this match.</p>}
-      <div className="md-subs-body">
-        <div className="md-subs-col"><div className="panel-label">On the Pitch</div>
-          {match.homeXI.map(p => <button key={p.id} className={`md-sub-row ${subOut === p.id ? 'active' : ''}`} disabled={subsMade >= MAX_SUBS} onClick={() => setSubOut(p.id)}><b>{p.name}</b><span>{p.role}</span></button>)}
-        </div>
-        <div className="md-subs-col"><div className="panel-label">Bench <small className="muted-sub">(up to {MAX_BENCH_CHOICES} available)</small></div>
-          {!subOut && subsMade < MAX_SUBS && <p className="muted-sub">Pick an outgoing player first.</p>}
-          {subOut && subsMade < MAX_SUBS && bench.map(p => <button key={p.id} className="md-sub-row" onClick={() => makeSub(p)}><b>{p.name}</b><span>{p.displayPos} · OVR {p.ovr} · Fit {p.fit}%</span></button>)}
-        </div>
-      </div>
-    </div>}
-
-    {teamTalkOpen && <div className="md-subs-panel">
-      <div className="md-subs-head"><b>Team Talk</b><span className="muted-sub">Your tone affects morale and motivation, not an instant boost.</span><button className="md-close" onClick={() => setTeamTalkOpen(false)}><X size={15} /></button></div>
-      <div className="tt-choices">
-        {['Calm', 'Encouraging', 'Demanding'].map(t => <button key={t} onClick={() => giveTeamTalk(t)}>{t}</button>)}
-      </div>
-      {teamTalkNote && <p className="muted-sub" style={{ marginTop: 10 }}>{teamTalkNote}</p>}
-    </div>}
-
-    <div className="match-grid">
-      <aside className="mcol-left">
-        <section className="panel">
-          <h3><ListVideo size={15} /> Match Info</h3>
-          <p className="mi-line">Premier League · Matchday 4</p>
-          <p className="mi-line">Old Trafford · {mm}:{ss}</p>
-          <div className="mi-score-row">
-            <div className="mi-team"><div className="crest-sq">MU</div><small>{match.homeName}</small></div>
-            <div className="mi-vs">{match.score.home} - {match.score.away}</div>
-            <div className="mi-team"><div className="crest-sq brighton">{match.awayName.slice(0, 2).toUpperCase()}</div><small>{match.awayName}</small></div>
-          </div>
-          <div className="mi-goals">
-            {goals.length === 0 && <p className="muted-sub">No goals yet.</p>}
-            {goals.map((g, i) => <p key={i} className="mi-goal"><Zap size={11} color={g.team === 'home' ? '#5be887' : '#8fa6ff'} /> {String(g.minute).padStart(2, '0')}' {g.text.split(' finds')[0].split(' shoots')[0]}</p>)}
-          </div>
-        </section>
-
-        <section className="panel">
-          <h3><BarChart3 size={15} /> Live Stats</h3>
-          <StatRow label="Possession" home={possessionHome} away={100 - possessionHome} format={v => v + '%'} />
-          <StatRow label="Shots" home={homeStats.shots} away={awayStats.shots} />
-          <StatRow label="Shots on Target" home={homeStats.onTarget} away={awayStats.onTarget} />
-          <StatRow label="Corners" home={homeStats.corners} away={awayStats.corners} />
-          <StatRow label="Fouls" home={homeStats.fouls} away={awayStats.fouls} />
-          <StatRow label="Pass Completion" home={passCompHome} away={passCompAway} format={v => v + '%'} />
-        </section>
-
-        <section className="panel">
-          <h3><Crosshair size={15} /> Formations</h3>
-          <div className="mf-row">
-            <button className="mf-card" onClick={() => setTacticsOverlayOpen(true)}><MiniFormation formationName={formation} side="home" /><small>{formation}</small></button>
-            <button className="mf-card" onClick={() => setTacticsOverlayOpen(true)}><MiniFormation formationName={match.oppFormationName} side="away" /><small>{match.oppFormationName}</small></button>
-          </div>
-        </section>
-      </aside>
-
-      <div className="mcol-center">
-        <div className="view-tabs">
-          {['Tactical View', 'Action View', 'Commentary View'].map(v => <button key={v} className={view === v.split(' ')[0] ? 'active' : ''} onClick={() => setView(v.split(' ')[0])}>{v}</button>)}
+        <div className="stadium-stand stand-top"><span>FAMILY 26</span><span>FAMILY 26</span></div>
+        <div className="stadium-stand stand-bottom"><span>FAMILY 26</span><span>DREAM. MANAGE. WIN.</span><span>FAMILY 26</span></div>
+        <div className="corner-crowd crowd-left" /><div className="corner-crowd crowd-right" />
+        <div className="pitch-shadow" />
+        <div className="broadcast-pitch">
+          <div className="pitch-stripes" />
+          <div className="pitch-lines"><span className="touch top" /><span className="touch bottom" /><span className="touch left" /><span className="touch right" /><span className="half-line" /><span className="center-circle" /><span className="center-dot" /><span className="box left" /><span className="box right" /><span className="six left" /><span className="six right" /><span className="goal left" /><span className="goal right" /><span className="penalty-dot left" /><span className="penalty-dot right" /></div>
+          <Player3DWebGL players={[...match.homeXI, ...match.awayXI]} selectedId={selectedId} running={running} getPosition={(p,w,h)=>({x:(p.x||50)/100*w,y:(p.y||50)/100*h,scale:0.60 + Math.max(0, Math.min(1,(100-(p.y||50))/100))*0.22})} />
+          {match.homeXI.map(p => <button key={`h-${p.id}`} className={`player-hitbox home ${selectedId===p.id?'selected':''}`} style={{left:`${p.x}%`,top:`${p.y}%`}} onClick={()=>setSelectedId(p.id)} aria-label={`${p.name} — ${ROLE_NAMES[p.role]||p.role}`} title={`${p.name} — ${ROLE_NAMES[p.role]||p.role}`}>
+            <span className="hitbox-label">{selectedId===p.id ? p.name.split(' ').slice(-1)[0] : ''}</span></button>)}
+          {match.awayXI.map(p => <button key={`a-${p.id}`} className={`player-hitbox away ${selectedId===p.id?'selected':''}`} style={{left:`${p.x}%`,top:`${p.y}%`}} onClick={()=>setSelectedId(p.id)} aria-label={`${p.name} — ${ROLE_NAMES[p.role]||p.role}`} title={`${p.name} — ${ROLE_NAMES[p.role]||p.role}`}>
+            <span className="hitbox-label">{selectedId===p.id ? p.name.split(' ').slice(-1)[0] : ''}</span></button>)}
+          <div className="ball-3d" style={{left:`${match.ballX}%`,top:`${match.ballY}%`}}><i /></div>
         </div>
 
-        <div className={`pitch-card ${view === 'Commentary' ? 'shrink' : ''}`}>
-          <div className="pitch-head"><span><Users size={13} /> {match.homeName} <small>{formation}</small></span><span className="right">{match.awayName} <small>{match.oppFormationName}</small></span></div>
-          <div className="pitch-viewport">
-            <div className="pitch-surface" style={pitchStyle}>
-              {[...Array(6)].map((_, i) => <div key={i} className="stripe" style={{ left: `${i * (100 / 6)}%`, width: `${100 / 6}%` }} />)}
-              <div className="mid-line" /><div className="center-circle" /><div className="pbox left" /><div className="pbox right" />
-              {match.homeXI.map(p => <PitchMarker key={p.id} p={p} onClick={pl => setSelectedId(pl.id)} selected={selectedId === p.id} />)}
-              {match.awayXI.map(p => <PitchMarker key={p.id} p={p} onClick={pl => setSelectedId(pl.id)} selected={selectedId === p.id} />)}
-              <PitchMarker p={{ x: match.ballX, y: match.ballY }} isBall />
-            </div>
-          </div>
-          <div className="pitch-legend">
-            <span><i className="dot home" /> Ball</span>
-            <span className="lg-arrow home">— —&gt;</span> Player movement
-            <span className="lg-arrow pass">- - -&gt;</span> Pass
-            <span className="lg-arrow away">— —&gt;</span> Opponent movement
-          </div>
+        <div className="action-banner"><span className="action-live"><Radio size={12}/> LIVE</span><b>{liveEvents[0]?.text || 'Match in progress'}</b><span>{liveEvents[0] ? `${liveEvents[0].minute}:${String(liveEvents[0].second||0).padStart(2,'0')}` : `${mm}:${ss}`}</span></div>
+
+        <div className="event-rail">
+          <div className="rail-head"><b>MATCH EVENTS</b><span>{liveEvents.length}</span></div>
+          {liveEvents.map((e,i)=><button key={i} className={`rail-event ${e.type}`} onClick={()=>{}}><b>{e.minute}'</b><span className="rail-icon">{e.type==='goal'?'⚽':e.type==='card'?'▰':e.type==='foul'?'⚑':e.type==='sub'?'↔':'•'}</span><small>{eventLabel(e)}</small><em>{e.text}</em></button>)}
+          {!liveEvents.length&&<div className="rail-empty">No major events yet.</div>}
         </div>
 
-        <div className="bottom-row">
-          <div className="panel feed-panel">
-            <div className="feed-tabs">{['Live Commentary', 'Match Events', 'Statistics'].map(t => <button key={t} className={feedTab === t ? 'active' : ''} onClick={() => setFeedTab(t)}>{t}</button>)}</div>
-            {feedTab === 'Statistics' ? <div className="feed-stats">
-              <StatRow label="Possession" home={possessionHome} away={100 - possessionHome} format={v => v + '%'} />
-              <StatRow label="Shots" home={homeStats.shots} away={awayStats.shots} />
-              <StatRow label="xG" home={(homeStats.xG||0).toFixed(2)} away={(awayStats.xG||0).toFixed(2)} />
-              <StatRow label="Pass Completion" home={passCompHome} away={passCompAway} format={v => v + '%'} />
-            </div> : <div className="feed-list">
-              {visibleFeed.slice(0, 40).map((e, i) => <div className={`feed-row ${e.type}`} key={i}>
-                <b>{String(e.minute).padStart(2, '0')}:{String(e.second).padStart(2, '0')}</b><span>{e.text}</span>
-              </div>)}
-              {visibleFeed.length === 0 && <p className="muted-sub" style={{ padding: 10 }}>Nothing to show yet.</p>}
-            </div>}
-          </div>
+        {selected && <div className="player-float"><div className="player-float-head"><span className={`float-dot ${selected.teamSide}`} /><div><b>{selected.name}</b><small>{selected.pos} · {ROLE_NAMES[selected.role]||selected.role}</small></div><strong>{matchRating(selected)}</strong></div><div className="float-grid"><span>Condition <b>{Math.round(selected.fit)}%</b></span><span>Goals <b>{selected.goals||0}</b></span><span>Shots <b>{selected.shots||0}</b></span><span>Passes <b>{selected.passesCompleted||0}/{selected.passesAttempted||0}</b></span></div></div>}
 
-          <div className="panel controls-panel">
-            <h3>Match Controls</h3>
-            <button onClick={() => setTacticsOverlayOpen(true)}><Crosshair size={14} /> Tactics</button>
-            <button onClick={() => setSubsOpen(s => !s)}><Repeat size={14} /> Substitutions {subsMade > 0 && <em>{subsMade}</em>}</button>
-            <button onClick={() => setTeamTalkOpen(o => !o)}><MessageSquare size={14} /> Team Talk</button>
-            <button onClick={runQuickSim}><FastForward size={14} /> Quick Sim</button>
-            <div className="speed-stepper">
-              <span>Speed</span>
-              <button onClick={() => setSpeed(s => SPEEDS[Math.max(0, SPEEDS.indexOf(s) - 1)])}><Minus size={13} /></button>
-              <b>{speed}x</b>
-              <button onClick={() => setSpeed(s => SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(s) + 1)])}><Plus size={13} /></button>
-            </div>
-            <label className="hl-toggle"><span>Highlights Only</span><button className={highlightsOnly ? 'on' : ''} onClick={() => setHighlightsOnly(h => !h)}><i /></button></label>
-          </div>
+        <div className="camera-pill"><span><Radio size={12}/> CAMERA</span><b>Broadcast</b><small>Default view</small></div>
+        <div className="pitch-compass">N</div>
+
+        <div className="match-command-dock">
+          <div><small>MENTALITY</small><b>{teamInstructions.mentality}</b></div>
+          <div><small>PASSING</small><b>{teamInstructions.passingStyle}</b></div>
+          <div><small>BUILD-UP</small><b>{teamInstructions.buildUp}</b></div>
+          <div><small>TRANSITION</small><b>{teamInstructions.transition?.counter ? 'COUNTER' : teamInstructions.transition?.regroup ? 'REGROUP' : teamInstructions.transition?.quickTransitions ? 'QUICK' : 'SHAPE'}</b></div>
+          <button onClick={()=>setTacticsOverlayOpen(true)}><Crosshair size={14}/> Change Tactics</button>
         </div>
-      </div>
 
-      <aside className="mcol-right">
-        <section className="panel">
-          <div className="stats-tabs">{['Match', 'Tactical', 'Player'].map(t => <button key={t} className={statsTab === t ? 'active' : ''} onClick={() => setStatsTab(t)}>{t}</button>)}</div>
-          {statsTab === 'Match' && <>
-            <StatRow label="Possession" home={possessionHome} away={100 - possessionHome} format={v => v + '%'} />
-            <StatRow label="Shots" home={homeStats.shots} away={awayStats.shots} />
-            <StatRow label="Shots on Target" home={homeStats.onTarget} away={awayStats.onTarget} />
-            <StatRow label="xG" home={(homeStats.xG||0).toFixed(2)} away={(awayStats.xG||0).toFixed(2)} />
-            <StatRow label="Corners" home={homeStats.corners} away={awayStats.corners} />
-            <StatRow label="Fouls" home={homeStats.fouls} away={awayStats.fouls} />
-            <StatRow label="Pass Completion" home={passCompHome} away={passCompAway} format={v => v + '%'} />
-          </>}
-          {statsTab === 'Tactical' && <>
-            <p className="ti-line"><span>Formation</span><b>{formation} <small className="muted-sub">vs</small> {match.oppFormationName}</b></p>
-            <p className="ti-line"><span>Defensive Line</span><b>{Math.round(teamInstructions.defensiveLine)}%</b></p>
-            <p className="ti-line"><span>Pressing Intensity</span><b>{Math.round(pressing.intensity)}%</b></p>
-            <StatRow label="Territory" home={territoryHome} away={100 - territoryHome} format={v => v + '%'} />
-            <p className="muted-sub" style={{ marginTop: 8 }}>Territory reflects which half of the pitch the ball has spent its time in, tracked live from the simulation.</p>
-          </>}
-          {statsTab === 'Player' && <div className="player-tab-list">
-            {match.homeXI.slice().sort((a, b) => matchRating(b) - matchRating(a)).map(p => <button key={p.id} className={`ptab-row ${selectedId === p.id ? 'sel' : ''}`} onClick={() => setSelectedId(p.id)}>
-              <b>{p.name}</b><span>{p.role}</span><em>{matchRating(p)}</em>
-            </button>)}
-          </div>}
-        </section>
+        <div className="match-controls-3d">
+          <button onClick={()=>setRunning(r=>!r)} disabled={match.finished} className="control-primary">{running?<Pause size={16} fill="currentColor"/>:<Play size={16} fill="currentColor"/>}</button>
+          <div className="speed-control"><span>SPEED</span>{SPEEDS.map(s=><button key={s} className={speed===s?'active':''} onClick={()=>setSpeed(s)}>{s}x</button>)}</div>
+          <button onClick={jumpToNextHighlight} title="Next highlight"><SkipForward size={15}/><span>Highlight</span></button>
+          <button onClick={()=>setHighlightsOnly(h=>!h)} className={highlightsOnly?'active':''}><Zap size={15}/><span>Highlights</span></button>
+          <button onClick={()=>setTacticsOverlayOpen(true)}><Crosshair size={15}/><span>Tactics</span></button>
+          <button onClick={()=>setSubsOpen(s=>!s)}><Repeat size={15}/><span>Subs</span>{subsMade>0&&<em>{subsMade}</em>}</button>
+          <button onClick={()=>setTeamTalkOpen(o=>!o)}><MessageSquare size={15}/><span>Talk</span></button>
+          <button onClick={()=>setStatsTab('Match')}><BarChart3 size={15}/><span>Stats</span></button>
+          <button onClick={toggleMatchFullscreen} className={matchFullscreen?'active':''}><Maximize2 size={15}/><span>{matchFullscreen?'Exit Match FS':'Match FS'}</span></button>
+          <button onClick={toggleBrowserFullscreen}><Monitor size={15}/><span>{browserFullscreen?'Exit Full':'Full Screen'}</span></button>
+          <button onClick={runQuickSim}><FastForward size={15}/><span>Quick Sim</span></button>
+        </div>
+      </section>
 
-        <section className="panel player-details">
-          <h3>Player Details</h3>
-          {!selected && <p className="muted-sub">Click a player on the pitch to see their live details.</p>}
-          {selected && <>
-            <div className="pd-head">
-              <div className="pd-avatar">{selected.name.split(' ').map(w => w[0]).join('').slice(0, 2)}</div>
-              <div><b>{selected.name}</b><small>{selected.pos} | {ROLE_NAMES[selected.role] || selected.role}</small><small className="muted-sub">{selected.teamSide === 'home' ? match.homeName : match.awayName}</small></div>
-              <div className="pd-rating">{matchRating(selected)}</div>
-            </div>
-            <div className="pd-bar"><span>Condition</span><div className="bar-track"><i style={{ width: `${selected.fit}%` }} /></div><b>{Math.round(selected.fit)}%</b></div>
-            <div className="pd-bar"><span>Sharpness</span><div className="bar-track"><i style={{ width: `${Math.max(30, 100 - selected.fatigue)}%` }} /></div><b>{Math.max(30, Math.round(100 - selected.fatigue))}%</b></div>
-            <p className="pd-morale">Morale <b className="lime">{selected.morale}</b></p>
-            <div className="pd-stats">
-              <div><small>Touches</small><b>{selected.touches || 0}</b></div>
-              <div><small>Passes</small><b>{selected.passesCompleted || 0}/{selected.passesAttempted || 0}</b></div>
-              <div><small>Shots</small><b>{selected.shots || 0}</b></div>
-              <div><small>Goals</small><b>{selected.goals || 0}</b></div>
-              <div><small>Distance (km)</small><b>{(selected.distanceKm || 0).toFixed(1)}</b></div>
-              <div><small>Tackles</small><b>{selected.tackles || 0}</b></div>
-            </div>
-            <div className="pd-behaviour"><Gauge size={13} /> Tactical Behaviour <b>{tacticalBehaviour(selected)}</b></div>
-            {selected.teamSide === 'home' && <button className="link-btn" onClick={() => openProfileFor(mapRosterPlayer(roster.find(r => r.id === selected.id) || { id: selected.id, name: selected.name, displayPos: selected.pos }), 'Match')}>View Full Profile</button>}
-          </>}
-        </section>
-
-        <section className="panel">
-          <h3><TriangleAlert size={15} /> Recent Events</h3>
-          <div className="recent-list">
-            {match.events.filter(e => e.type !== 'play' && e.type !== 'info').slice(0, 10).map((e, i) => <button className="recent-row" key={i} onClick={() => { }}>
-              <b>{e.minute}'</b>
-              <span className={`ev-tag ${e.type}`}>{e.type === 'goal' ? 'GOAL' : e.type === 'foul' ? 'Foul' : e.type === 'sub' ? 'Sub' : e.type === 'turnover' ? 'Turnover' : e.type === 'setpiece' ? 'Corner' : 'Chance'}</span>
-              <small>{e.text}</small>
-            </button>)}
-            {match.events.filter(e => e.type !== 'play' && e.type !== 'info').length === 0 && <p className="muted-sub">No major events yet.</p>}
-          </div>
-        </section>
-      </aside>
-    </div>
+      <section className="match-info-drawer">
+        <div className="drawer-tabs"><button className="active">LIVE</button><button>EVENTS</button><button>STATS</button><button>SQUAD</button></div>
+        <div className="drawer-content">
+          <div className="drawer-section"><div className="drawer-title"><b>LIVE MATCH</b><span>{match.finished?'FT':half}</span></div><div className="drawer-score"><span>{match.homeName}</span><strong>{match.score.home}</strong><i>–</i><strong>{match.score.away}</strong><span>{match.awayName}</span></div></div>
+          <div className="drawer-section"><div className="drawer-title"><b>TEAM SHAPE</b><button onClick={()=>setTacticsOverlayOpen(true)}>Edit</button></div><div className="shape-row"><div><MiniFormation formationName={formation} side="home"/><small>{formation}</small></div><div className="shape-arrow">VS</div><div><MiniFormation formationName={match.oppFormationName} side="away"/><small>{match.oppFormationName}</small></div></div></div>
+          <div className="drawer-section"><div className="drawer-title"><b>LIVE STATS</b><button onClick={()=>setStatsTab('Match')}>Full</button></div><StatRow label="Possession" home={possessionHome} away={100-possessionHome} format={v=>`${v}%`}/><StatRow label="Shots" home={homeStats.shots} away={awayStats.shots}/><StatRow label="xG" home={(homeStats.xG||0).toFixed(2)} away={(awayStats.xG||0).toFixed(2)}/><StatRow label="Pass Accuracy" home={passCompHome} away={passCompAway} format={v=>`${v}%`}/></div>
+          <div className="drawer-section"><div className="drawer-title"><b>TACTICAL STATE</b></div><div className="tactical-chips"><span>{teamInstructions.mentality}</span><span>{formation}</span><span>Press {Math.round(pressing.intensity)}%</span><span>Tempo {Math.round(teamInstructions.tempo)}</span></div></div>
+          <div className="drawer-section selected-drawer"><div className="drawer-title"><b>PLAYER PERFORMANCE</b></div>{selected?<><div className="selected-line"><b>{selected.name}</b><strong>{matchRating(selected)}</strong></div><div className="mini-metrics"><span>Touches <b>{selected.touches||0}</b></span><span>Goals <b>{selected.goals||0}</b></span><span>Assists <b>{selected.assists||0}</b></span><span>Distance <b>{(selected.distanceKm||0).toFixed(1)} km</b></span></div></>:<p className="drawer-muted">Select a player on the pitch.</p>}</div>
+        </div>
+      </section>
+    </main>
   </div>;
+
 }

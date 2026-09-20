@@ -10,6 +10,8 @@ import { useWorldData } from './WorldContext.jsx';
 import { usePlayerState } from './PlayerStateContext.jsx';
 import { useManagerData } from './ManagerContext.jsx';
 import { useClubState } from './ClubStateContext.jsx';
+import { useCareerRecords } from './CareerRecordsContext.jsx';
+import { buildSaveEnvelope, cloudReadyPayload, writeLocalSave, readLocalSave, deleteLocalSave, SAVE_SCHEMA } from '../engine/saveArchitecture.js';
 
 const SaveCtx = createContext(null);
 export const AUTOSAVE_KEY = 'family26_autosave';
@@ -30,6 +32,7 @@ export function SaveProvider({ children }) {
   const playerState = usePlayerState();
   const manager = useManagerData();
   const clubState = useClubState();
+  const records = useCareerRecords();
 
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [lastSaveReason, setLastSaveReason] = useState(null);
@@ -42,28 +45,41 @@ export function SaveProvider({ children }) {
   useEffect(() => {
     const raw = localStorage.getItem(AUTOSAVE_KEY);
     const snap = safeParse(raw);
-    if (snap) setRecovery({ savedAt: snap.savedAt, dateLabel: snap.simulation?.now ? new Date(snap.simulation.now).toDateString() : null });
+    if (snap) setRecovery({ savedAt: snap.savedAt, dateLabel: snap.career?.simulation?.now ? new Date(snap.career.simulation.now).toDateString() : null });
+    else void readLocalSave('autosave').then(idbSnap => {
+      if (idbSnap) setRecovery({ savedAt: idbSnap.savedAt, dateLabel: idbSnap.career?.simulation?.now ? new Date(idbSnap.career.simulation.now).toDateString() : null });
+    }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const collect = useCallback(() => ({
-    savedAt: new Date().toISOString(),
-    manager: { club: 'Manchester United', name: 'Cyprian' },
-    simulation: sim.getSnapshot(),
-    finance: finance.getSnapshot(),
-    transfers: transfers.getSnapshot(),
-    competition: competition.getSnapshot(),
-    tactics: tactics.getSnapshot(),
-    communication: communication.getSnapshot(),
-    staff: staff.getSnapshot(),
-    world: world.getSnapshot(),
-    playerState: playerState.getSnapshot(),
-    managerState: manager.getSnapshot(),
-    clubState: clubState.getSnapshot(),
-  }), [sim, finance, transfers, competition, tactics, communication, staff, world, playerState, manager, clubState]);
+  const collect = useCallback(() => {
+    const career = {
+      schemaVersion: 3,
+      game: { name: 'FAMILY 26', saveFormat: 'career-v3' },
+      manager: manager.profile || {},
+      simulation: sim.getSnapshot(),
+      finance: finance.getSnapshot(),
+      transfers: transfers.getSnapshot(),
+      competition: competition.getSnapshot(),
+      tactics: tactics.getSnapshot(),
+      communication: communication.getSnapshot(),
+      staff: staff.getSnapshot(),
+      world: world.getSnapshot(),
+      playerState: playerState.getSnapshot(),
+      managerState: manager.getSnapshot(),
+      clubState: clubState.getSnapshot(),
+      careerRecords: records.getSnapshot(),
+    };
+    return buildSaveEnvelope({
+      career,
+      world: { competition: career.competition, world: career.world, players: career.playerState },
+      database: { source: 'family26-canonical-men-db-v2', careerSeed: manager.profile?.careerSeed || null },
+    });
+  }, [sim, finance, transfers, competition, tactics, communication, staff, world, playerState, manager, clubState, records]);
 
-  const apply = useCallback((snap) => {
-    if (!snap) return;
+  const apply = useCallback((input) => {
+    if (!input) return;
+    const snap = input.career || input;
     sim.restoreSnapshot(snap.simulation);
     finance.restoreSnapshot(snap.finance);
     transfers.restoreSnapshot(snap.transfers);
@@ -75,12 +91,14 @@ export function SaveProvider({ children }) {
     playerState.restoreSnapshot(snap.playerState);
     manager.restoreSnapshot(snap.managerState);
     clubState.restoreSnapshot(snap.clubState);
-  }, [sim, finance, transfers, competition, tactics, communication, staff, world, playerState, manager, clubState]);
+    records.restoreSnapshot(snap.careerRecords);
+  }, [sim, finance, transfers, competition, tactics, communication, staff, world, playerState, manager, clubState, records]);
 
   const autoSave = useCallback((reason = 'Auto-save') => {
     try {
       const snap = collect();
       localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snap));
+      void writeLocalSave('autosave', snap).catch(() => {});
       setLastSavedAt(new Date());
       setLastSaveReason(reason);
     } catch (e) { console.warn('Auto-save failed', e); }
@@ -90,39 +108,49 @@ export function SaveProvider({ children }) {
     try {
       const snap = collect();
       localStorage.setItem(SLOT_PREFIX + idx, JSON.stringify(snap));
+      void writeLocalSave(`slot-${idx}`, snap).catch(() => {});
       setLastSavedAt(new Date());
       setLastSaveReason('Manual save');
       return true;
     } catch (e) { console.warn('Manual save failed', e); return false; }
   }, [collect]);
 
-  const loadFromSlot = useCallback((idx) => {
-    const snap = safeParse(localStorage.getItem(SLOT_PREFIX + idx));
+  const loadFromSlot = useCallback(async (idx) => {
+    let snap = safeParse(localStorage.getItem(SLOT_PREFIX + idx));
+    if (!snap) snap = await readLocalSave(`slot-${idx}`).catch(() => null);
     if (!snap) return false;
     apply(snap);
     return true;
   }, [apply]);
 
-  const deleteSlot = useCallback((idx) => localStorage.removeItem(SLOT_PREFIX + idx), []);
+  const deleteSlot = useCallback((idx) => {
+    localStorage.removeItem(SLOT_PREFIX + idx);
+    void deleteLocalSave(`slot-${idx}`).catch(() => {});
+  }, []);
 
   const getSlots = useCallback(() => Array.from({ length: SLOT_COUNT }).map((_, i) => {
     const snap = safeParse(localStorage.getItem(SLOT_PREFIX + i));
     if (!snap) return { index: i, empty: true };
+    const club = snap.career?.manager?.currentClub || snap.career?.manager?.club || 'Current Club';
     return {
       index: i, empty: false, savedAt: snap.savedAt,
-      dateLabel: snap.simulation?.now ? new Date(snap.simulation.now).toDateString() : '—',
-      club: snap.manager?.club || 'Manchester United',
+      dateLabel: snap.career?.simulation?.now ? new Date(snap.career.simulation.now).toDateString() : '—',
+      club,
+      managerName: snap.career?.manager?.name || 'Manager',
+      crestInitials: club.split(' ').map(w => w[0]).join('').slice(0, 3).toUpperCase(),
     };
   }), []);
 
   const recoverSession = useCallback(() => {
     const snap = safeParse(localStorage.getItem(AUTOSAVE_KEY));
     if (snap) apply(snap);
+    else void readLocalSave('autosave').then(idbSnap => { if (idbSnap) apply(idbSnap); }).catch(() => {});
     setRecovery(null);
   }, [apply]);
 
   const discardRecovery = useCallback(() => {
     localStorage.removeItem(AUTOSAVE_KEY);
+    void deleteLocalSave('autosave').catch(() => {});
     setRecovery(null);
   }, []);
 
@@ -156,11 +184,15 @@ export function SaveProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerKey]);
 
+  const exportSave = useCallback(() => JSON.stringify(collect(), null, 2), [collect]);
+  const exportCloudSave = useCallback(() => JSON.stringify(cloudReadyPayload(collect()), null, 2), [collect]);
+  const importSave = useCallback((raw) => { try { const snap = typeof raw === 'string' ? JSON.parse(raw) : raw; apply(snap); return true; } catch (e) { console.warn('Import failed', e); return false; } }, [apply]);
+
   const value = {
     lastSavedAt, lastSaveReason, autoSave,
     saveToSlot, loadFromSlot, deleteSlot, getSlots,
     recovery, recoverSession, discardRecovery,
-    SLOT_COUNT,
+    SLOT_COUNT, exportSave, exportCloudSave, importSave, schemaVersion: 3, saveSchema: SAVE_SCHEMA,
   };
 
   return <SaveCtx.Provider value={value}>{children}</SaveCtx.Provider>;

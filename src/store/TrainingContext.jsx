@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
-import { players as roster } from '../data/roster.js';
+import { useDatabase } from './DatabaseContext.jsx';
+import { usePlayerState } from './PlayerStateContext.jsx';
+import { useStaffData } from './StaffContext.jsx';
 
 const TrainingCtx = createContext(null);
 
@@ -23,8 +25,10 @@ export const SESSION_COACH_CATEGORY = {
 };
 
 const FOCUS_OPTIONS = ['Finishing', 'Passing', 'Dribbling', 'Strength', 'Pace', 'Stamina', 'Defensive Ability', 'Positioning', 'Set Pieces'];
+const SESSION_DEFAULT_FOCUS = { Fitness:'Stamina', Attacking:'Finishing', Defending:'Defensive Ability', Possession:'Passing', Tactical:'Positioning', 'Set Pieces':'Set Pieces', Transition:'Pace', Teamwork:'Passing', 'Youth Development':'Dribbling', 'Match Preparation':'Positioning', Recovery:'General', Rest:'General' };
+const ROLE_FOCUS = { ST:'Finishing', CF:'Finishing', LW:'Dribbling', RW:'Dribbling', AM:'Passing', CM:'Passing', DM:'Defensive Ability', LB:'Defensive Ability', RB:'Defensive Ability', CB:'Defensive Ability', GK:'Positioning' };
 
-function seedPlayerTraining() {
+function seedPlayerTraining(roster) {
   const map = {};
   roster.forEach(p => {
     map[p.id] = {
@@ -36,7 +40,7 @@ function seedPlayerTraining() {
   return map;
 }
 
-function seedDevelopmentLog() {
+function seedDevelopmentLog(roster) {
   const young = roster.filter(p => p.age <= 24).slice(0, 6);
   return young.map((p, i) => ({
     playerId: p.id, name: p.name,
@@ -48,18 +52,47 @@ function seedDevelopmentLog() {
 function seedReports() {
   return [
     { id: 1, text: 'Tactical familiarity improved after 4-3-3 sessions', type: 'positive', date: '13 Dec 2025' },
-    { id: 2, text: "Garnacho's finishing has improved this week", type: 'positive', date: '13 Dec 2025' },
+    { id: 2, text: "Villanueva's finishing has improved this week", type: 'positive', date: '13 Dec 2025' },
     { id: 3, text: 'Squad fatigue rising after back-to-back high-intensity weeks', type: 'negative', date: '12 Dec 2025' },
   ];
 }
 
 export function TrainingProvider({ children }) {
+  const { careerSquad: roster } = useDatabase();
+  const playerState = usePlayerState();
+  const { staffList } = useStaffData();
   const [delegation, setDelegation] = useState('Manual');
   const [schedule, setSchedule] = useState(BASE_SCHEDULE);
   const [individualPlans, setIndividualPlans] = useState({});
-  const [playerTraining, setPlayerTraining] = useState(seedPlayerTraining);
-  const [developmentLog] = useState(seedDevelopmentLog);
+  const [playerTraining, setPlayerTraining] = useState(() => seedPlayerTraining(roster));
+  const [developmentLog, setDevelopmentLog] = useState(() => seedDevelopmentLog(roster));
   const [reports, setReports] = useState(seedReports);
+
+  const coachForType = useCallback((type) => {
+    const category = SESSION_COACH_CATEGORY[type] || 'Coaches';
+    const candidates = staffList.filter(s => s.dept === 'Coaching' && s.category === category);
+    return candidates.sort((a,b)=>(b.rating||3)-(a.rating||3))[0] || staffList.find(s=>s.dept==='Coaching') || null;
+  }, [staffList]);
+
+  const applyDayTraining = useCallback((dateLabel) => {
+    const date = new Date(dateLabel);
+    const scheduleIndex = Number.isNaN(date.getTime()) ? 0 : (date.getDay() + 1) % 7;
+    const day = schedule[scheduleIndex] || schedule[0];
+    if (!day) return null;
+    const coach = coachForType(day.type);
+    const intensity = day.type === 'Recovery' || day.type === 'Rest' ? 30 : day.type === 'Fitness' ? 82 : 65;
+    const focus = SESSION_DEFAULT_FOCUS[day.type] || FOCUS_OPTIONS[0];
+    const individualFocuses = Object.fromEntries(roster.map(p => [p.id, individualPlans[p.id]?.focuses?.[0] || '']));
+    playerState.applyTrainingSession(day.type, intensity, focus, { coachName: coach?.name, coachRating: coach?.rating || 3, roleFocus: ROLE_FOCUS, individualFocuses });
+    const created = [];
+    roster.slice(0, 12).forEach(p => {
+      const plan = individualPlans[p.id];
+      const planFocus = plan?.focuses?.[0] || focus;
+      created.push({ playerId:p.id, name:p.name, attr:planFocus, before:Math.round(Number(p.attributes?.[planFocus.toLowerCase().replace(/ /g,'_')] || p.ovr || p.ca || 0)), after:Math.round(Number(p.attributes?.[planFocus.toLowerCase().replace(/ /g,'_')] || p.ovr || p.ca || 0) + 0.1), date:dateLabel, session:day.type, coach:coach?.name || 'Coaching Staff' });
+    });
+    setDevelopmentLog(prev=>[...created,...prev].slice(0,30));
+    return { ...day, coach:coach?.name || 'Coaching Staff', focus };
+  }, [schedule, coachForType, playerState, roster, individualPlans]);
 
   const setDaySession = useCallback((dayIndex, type, detail) => {
     setSchedule(s => s.map((d, i) => i === dayIndex ? { ...d, type, detail: detail ?? d.detail } : d));
@@ -106,7 +139,7 @@ export function TrainingProvider({ children }) {
     delegation, setDelegation, schedule, setSchedule, setDaySession, applyAutoSchedule,
     individualPlans, setPlan, FOCUS_OPTIONS,
     playerTraining, reduceWorkload, overloaded,
-    developmentLog, reports, addReport,
+    developmentLog, reports, addReport, applyDayTraining, coachForType,
     youthPlayers, trainingEffectiveness,
   };
 

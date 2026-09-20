@@ -1,0 +1,95 @@
+{
+  "format": "family26-men-database-v1",
+  "source": "FAMILY26_mens_only.zip",
+  "gender": "men",
+  "tables": {
+    "players": {
+      "file": "players.json.gz",
+      "rows": 99673,
+      "columns": 67
+    },
+    "clubs": {
+      "file": "clubs.json.gz",
+      "rows": 32104,
+      "columns": 24
+    },
+    "competitions": {
+      "file": "competitions.json.gz",
+      "rows": 1523,
+      "columns": 18
+    },
+    "stadiums": {
+      "file": "stadiums.json.gz",
+      "rows": 12516,
+      "columns": 7
+    },
+    "club_squads": {
+      "file": "club_squads.json.gz",
+      "rows": 93108,
+      "columns": 5
+    },
+    "starting_contracts_raw": {
+      "file": "starting_contracts_raw.json.gz",
+      "rows": 110941,
+      "columns": 5
+    },
+    "nations": {
+      "file": "nations.json.gz",
+      "rows": 251,
+      "columns": 10
+    }
+  },
+  "playerVector51": [
+    "left_foot",
+    "right_foot",
+    "crossing",
+    "dribbling",
+    "tackling",
+    "finishing",
+    "long_shot",
+    "heading",
+    "jumping",
+    "passing",
+    "decision",
+    "unselfishness",
+    "pace",
+    "strength",
+    "stamina",
+    "technique",
+    "consistency",
+    "aggression",
+    "big_match",
+    "injury_prone",
+    "leadership",
+    "versatility",
+    "set_pieces",
+    "penalty",
+    "creativity",
+    "movement",
+    "positioning",
+    "work_rate",
+    "flair",
+    "handling",
+    "kicking",
+    "agility",
+    "aerial",
+    "reflexes",
+    "communication",
+    "throwing",
+    "gk",
+    "lib",
+    "lb",
+    "cb",
+    "rb",
+    "dm",
+    "lm",
+    "cm",
+    "rm",
+    "lw",
+    "am",
+    "rw",
+    "cf",
+    "lwb",
+    "rwb"
+  ]
+}
